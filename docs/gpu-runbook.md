@@ -45,9 +45,12 @@ Fresh instance to serving: ~20 min (boot 6 + venv/vllm 5 + driver/reboot 5 +
 model load 4; first-ever model download adds ~5-10). Extraction, 53 docs /
 83 chunks: ~13 min on the A100. Whole pilot run: well under $1 of A100 time.
 
-## Watchdog warning
+## Instance lifecycle (resolved)
 
-Instances launched via the raw Lambda API (not through Manifold's Jobs
-system) have been terminated externally mid-run. Until that's resolved,
-expect API-launched boxes to be reaped; keep everything restartable (it is:
-weights on NFS, extraction resumes via DBOS + per-document bookkeeping).
+The two lost instances on the first night were NOT reaped by Manifold — its
+audit log shows zero terminations for those boxes. The cause was this
+harness's own relaunch-on-timeout logic (a terminate-plus-launch fired when
+a readiness check timed out). With correct readiness polling, API-launched
+instances are stable; Manifold also adopts externally-launched instances for
+Files/chat/telemetry. Everything here is restartable regardless (weights on
+NFS, extraction resumes via DBOS + per-document bookkeeping).

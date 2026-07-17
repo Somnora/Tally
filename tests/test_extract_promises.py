@@ -83,7 +83,7 @@ def test_verified_promise_is_stored_with_exact_offsets(conn: db.Connection) -> N
     assert row[3] is True
     assert row[4] == "social_security"  # normalized lowercase
     assert row[5] is True
-    assert row[6] == "extract_v1"
+    assert row[6] == "extract_v2"
 
 
 def test_hallucinated_quote_is_rejected_never_stored(conn: db.Connection) -> None:
@@ -151,3 +151,31 @@ def test_extraction_is_idempotent_per_prompt_and_model(conn: db.Connection) -> N
     assert first["documents_extracted"] == 1
     assert second["documents_extracted"] == 0  # already done under this prompt+model
     assert db.count_rows(conn, "promises") == 1
+
+
+def test_reextraction_under_new_model_replaces_prior_promises(conn: db.Connection) -> None:
+    """A different model re-processes the doc and clears the old promises,
+    rather than accumulating both versions."""
+    politician_id, source_id = _seed_candidate(conn)
+    _make_document(conn, politician_id, source_id)
+    quote_a = "i will never cut social security benefits"
+    start_a = DOCUMENT_TEXT.index(quote_a)
+    extract_promises(
+        conn, politician_id, model_name="model-a",
+        agent=_agent_returning([{
+            "verbatim_quote": quote_a, "char_start": start_a, "char_end": start_a + len(quote_a),
+            "topic": "social_security", "specificity": "measurable",
+        }]),
+    )
+    quote_b = "i will vote to cap insulin prices at thirty five dollars"
+    start_b = DOCUMENT_TEXT.index(quote_b)
+    extract_promises(
+        conn, politician_id, model_name="model-b",
+        agent=_agent_returning([{
+            "verbatim_quote": quote_b, "char_start": start_b, "char_end": start_b + len(quote_b),
+            "topic": "healthcare", "specificity": "measurable",
+        }]),
+    )
+    rows = conn.execute("SELECT verbatim_quote, model_name FROM promises").fetchall()
+    assert len(rows) == 1  # model-a's promise replaced, not accumulated
+    assert rows[0] == (quote_b, "model-b")

@@ -36,7 +36,7 @@ from pipeline.verify import verify_quote
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "extract_v1"
+PROMPT_VERSION = "extract_v2"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 CHUNK_CHARS = 10_000   # ~2.5k tokens
@@ -105,6 +105,9 @@ def extract_document(
     model_name: str,
     stats: StageStats,
 ) -> None:
+    # A document reaching this point is being (re)extracted under the current
+    # prompt+model; drop any prior-version promises so the result is clean.
+    db.delete_promises_for_document(conn, document.document_id)
     for chunk_offset, chunk_text in chunk_document(document.full_text):
         result = agent.run_sync(chunk_text)
         stats["chunks_processed"] += 1

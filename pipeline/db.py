@@ -526,6 +526,11 @@ def politicians_needing_extraction(conn: Connection) -> list[int]:
     return sorted(int(r[0]) for r in cur.fetchall())
 
 
+def delete_promises_for_document(conn: Connection, document_id: int) -> None:
+    """Remove a document's promises before re-extraction under a new prompt/model."""
+    conn.execute(load_sql("promises_delete_for_document"), {"document_id": document_id})
+
+
 def mark_document_extracted(
     conn: Connection, document_id: int, model_name: str, prompt_version: str
 ) -> None:
