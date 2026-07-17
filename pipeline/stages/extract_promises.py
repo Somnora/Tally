@@ -117,8 +117,19 @@ def extract_document(
                 promise.char_start, promise.char_end,
             )
             if not verification.verified:
-                # THE gate: hallucinated/paraphrased quotes die here, loudly.
+                # THE gate: hallucinated/paraphrased quotes die here — and
+                # are persisted, because rejections are QA data (the v1
+                # pilot's reject texts were lost to log filtering).
                 stats["quotes_rejected"] += 1
+                db.insert_extraction_reject(
+                    conn,
+                    document_id=document.document_id,
+                    politician_id=politician_id,
+                    rejected_quote=promise.verbatim_quote,
+                    chunk_offset=chunk_offset,
+                    model_name=model_name,
+                    prompt_version=PROMPT_VERSION,
+                )
                 logger.warning(
                     "REJECTED quote (doc %d, %s): %r",
                     document.document_id, document.url, promise.verbatim_quote[:120],
@@ -129,7 +140,12 @@ def extract_document(
                 conn,
                 politician_id=politician_id,
                 document_id=document.document_id,
-                verbatim_quote=promise.verbatim_quote,
+                # Always the DOCUMENT's own span — identical to the model's
+                # text for exact/relocated matches, and the honest original
+                # (real whitespace/typography) for normalized matches.
+                verbatim_quote=document.full_text[
+                    verification.char_start : verification.char_end
+                ],
                 char_start=verification.char_start,
                 char_end=verification.char_end,
                 topic=promise.topic.strip().lower() or "other",
@@ -156,7 +172,8 @@ def extract_promises(
 
     stats: StageStats = {
         "documents_extracted": 0, "chunks_processed": 0, "promises_stored": 0,
-        "quotes_exact": 0, "quotes_relocated": 0, "quotes_rejected": 0,
+        "quotes_exact": 0, "quotes_relocated": 0, "quotes_normalized": 0,
+        "quotes_rejected": 0,
     }
     documents = db.documents_for_extraction(conn, politician_id, PROMPT_VERSION, model_name)
     for document in documents:

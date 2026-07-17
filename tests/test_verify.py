@@ -80,3 +80,47 @@ def test_negative_absolute_offsets_fall_back_to_search() -> None:
     assert result.verified
     assert result.method == "relocated"
     assert result.char_start == 0
+
+
+# -- rung 3: normalized matching (whitespace / typographic folding) ------------
+
+WEB_DOCUMENT = (
+    "Our Plan\n\nHealth Care\nChellie believes access to care is a right —\n"
+    "she’ll fight to “lower drug prices” for every family.\nRead more below."
+)
+
+
+def test_whitespace_only_mismatch_is_recovered_not_rejected() -> None:
+    # Model copied verbatim but collapsed the newline into a space.
+    quote = "Chellie believes access to care is a right"
+    doc = WEB_DOCUMENT.replace(
+        "believes access", "believes\naccess"
+    )
+    result = verify_quote(doc, 0, quote, 0, len(quote))
+    assert result.verified
+    assert result.method == "normalized"
+    # The document slice is the stored text: same words, document's spacing.
+    assert doc[result.char_start:result.char_end].split() == quote.split()
+
+
+def test_typographic_punctuation_fold_is_recovered() -> None:
+    # Model emitted straight quotes/apostrophe/dash for the doc's curly ones.
+    quote = 'she\'ll fight to "lower drug prices" for every family.'
+    result = verify_quote(WEB_DOCUMENT, 0, quote, 0, len(quote))
+    assert result.verified
+    assert result.method == "normalized"
+    stored = WEB_DOCUMENT[result.char_start:result.char_end]
+    assert stored == "she’ll fight to “lower drug prices” for every family."
+
+
+def test_normalized_rung_still_rejects_paraphrase() -> None:
+    result = verify_quote(WEB_DOCUMENT, 0, "she will fight to lower drug costs", 0, 30)
+    assert not result.verified
+    assert result.method == "rejected"
+
+
+def test_normalized_offsets_slice_document_exactly() -> None:
+    quote = "access  to   care is a right"  # extra internal whitespace from model
+    result = verify_quote(WEB_DOCUMENT, 0, quote, 0, len(quote))
+    assert result.verified
+    assert WEB_DOCUMENT[result.char_start:result.char_end] == "access to care is a right"

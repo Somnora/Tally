@@ -100,6 +100,14 @@ def test_hallucinated_quote_is_rejected_never_stored(conn: db.Connection) -> Non
     assert stats["quotes_rejected"] == 1
     assert stats["promises_stored"] == 0
     assert db.count_rows(conn, "promises") == 0
+    # The rejection is persisted as QA data, tagged with prompt+model.
+    reject = conn.execute(
+        "SELECT rejected_quote, prompt_version, model_name FROM extraction_rejects"
+    ).fetchone()
+    assert reject is not None
+    assert reject[0] == "I will abolish the federal reserve"
+    assert reject[1] == "extract_v2"
+    assert reject[2] == "test-model"
 
 
 def test_drifted_offsets_are_relocated(conn: db.Connection) -> None:
@@ -135,6 +143,29 @@ def test_rhetorical_promises_stored_but_never_scoreable(conn: db.Connection) -> 
     row = conn.execute("SELECT is_scoreable FROM promises").fetchone()
     assert row is not None
     assert row[0] is False
+
+
+def test_normalized_match_stores_document_slice_not_model_text(conn: db.Connection) -> None:
+    """Model text with mangled whitespace verifies via the normalized rung,
+    and what gets stored is the DOCUMENT's exact span."""
+    politician_id, source_id = _seed_candidate(conn)
+    doc_id = _make_document(conn, politician_id, source_id)
+    model_text = "i  will never cut social\nsecurity benefits"  # doubled space + newline
+    stats = extract_promises(
+        conn, politician_id, model_name="test-model",
+        agent=_agent_returning([{
+            "verbatim_quote": model_text, "char_start": 0, "char_end": len(model_text),
+            "topic": "social_security", "specificity": "measurable",
+        }]),
+    )
+    assert stats["quotes_normalized"] == 1
+    row = conn.execute(
+        "SELECT verbatim_quote, char_start, char_end FROM promises WHERE document_id = %s",
+        (doc_id,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "i will never cut social security benefits"  # document's text
+    assert DOCUMENT_TEXT[row[1]:row[2]] == row[0]
 
 
 def test_extraction_is_idempotent_per_prompt_and_model(conn: db.Connection) -> None:

@@ -526,6 +526,30 @@ def politicians_needing_extraction(conn: Connection) -> list[int]:
     return sorted(int(r[0]) for r in cur.fetchall())
 
 
+def insert_extraction_reject(
+    conn: Connection,
+    *,
+    document_id: int,
+    politician_id: int,
+    rejected_quote: str,
+    chunk_offset: int,
+    model_name: str,
+    prompt_version: str,
+) -> None:
+    """Persist a gate rejection — QA data for prompt iteration, never displayed."""
+    conn.execute(
+        load_sql("extraction_reject_insert"),
+        {
+            "document_id": document_id,
+            "politician_id": politician_id,
+            "rejected_quote": rejected_quote,
+            "chunk_offset": chunk_offset,
+            "model_name": model_name,
+            "prompt_version": prompt_version,
+        },
+    )
+
+
 def delete_promises_for_document(conn: Connection, document_id: int) -> None:
     """Remove a document's promises before re-extraction under a new prompt/model."""
     conn.execute(load_sql("promises_delete_for_document"), {"document_id": document_id})

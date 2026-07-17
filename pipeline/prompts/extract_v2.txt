@@ -6,21 +6,23 @@ punctuation, no speaker labels, occasional transcription errors.
 
 A PROMISE is a statement that passes ALL THREE tests:
   (A) FUTURE: a commitment about what will happen going forward, not a
-      report of something already done.
-  (B) POLICY / GOVERNING: about what the candidate would do in office, or a
-      substantive position on an issue voters decide on. Not logistics,
-      pleasantries, or process talk.
-  (C) THE CANDIDATE'S OWN COMMITMENT: the candidate is committing THEMSELVES
-      (or the office they seek). Not what someone else should do, not what
-      "we as a country" ought to do in the abstract.
+      report of something already done or currently underway.
+  (B) GOVERNING: about what the candidate would do or stand for in office —
+      a policy action, a vote, or a clearly stated governing principle.
+      Not logistics, pleasantries, or conversation management.
+  (C) THE CANDIDATE'S COMMITMENT: the candidate is committing themselves or
+      the office they seek. Campaign-site text written in the third person
+      ("Paul will fight to...", "Chellie favors...") IS the candidate's own
+      commitment. Demands aimed at other people are not.
 
 If a statement fails any test, DO NOT extract it. When unsure, skip.
 
 Rules, in priority order:
 
 1. VERBATIM means VERBATIM. verbatim_quote must be copied character for
-   character from the chunk, including errors, casing, and missing
-   punctuation. Never paraphrase, never fix grammar, never add words.
+   character from the chunk, including errors, casing, punctuation, and
+   line breaks exactly as they appear. Never paraphrase, never fix grammar,
+   never add or drop words.
 2. char_start and char_end are the quote's offsets WITHIN THIS CHUNK
    (0-indexed, end exclusive), such that chunk[char_start:char_end] equals
    verbatim_quote exactly.
@@ -28,25 +30,31 @@ Rules, in priority order:
    interviewer, opponent, moderator, or narrator. In unlabeled transcripts,
    extract only when context makes clear the candidate is the speaker;
    when unsure, skip.
+4. Each verbatim_quote is the SHORTEST self-contained span that carries the
+   whole promise — usually one sentence, rarely more than 300 characters.
+   Distinct promises are separate list items, never merged into one quote.
 
-DO NOT extract (these are the most common mistakes):
+DO NOT extract (the most common mistakes):
   - Past actions or record: "I voted for...", "I signed a letter...",
-    "we passed...", "I've always fought for..." (fails test A).
-  - Procedural or logistical statements: "I'll look into that", "I'll get
-    back to you", "we'll follow up", "let me check" (fails test B).
-  - Demands ON others or third-party calls to action: "we need their
+    "we passed..." (fails test A).
+  - Current or ongoing activity: "we're working on...", "we're trying
+    to...", "I'm fighting to..." said about the present (fails test A).
+  - Procedural or conversational commitments: "I'll look into that",
+    "I'll get back to you", "let me check" (fails test B).
+  - Demands on others or third-party calls to action: "we need their
     commitment", "Congress must act", "they should stop" (fails test C).
-  - Pure criticism of an opponent or the administration, with no commitment.
-  - Biographical facts, endorsements, and pleasantries.
+  - Pure criticism of an opponent or administration with no commitment.
+  - Biographical facts, endorsements, thanks, and pleasantries.
 
 specificity (only for statements that ARE promises):
   - measurable: a concrete, checkable commitment (a number, a named bill,
     a defined action: "I will vote against any cut to Medicaid").
-  - directional: a clear commitment without a checkable threshold
-    ("I will fight to lower drug prices").
-  - rhetorical: a values statement that commits to a direction but names no
-    action ("I will always stand up for Maine families"). Store it, but it
-    is never scored.
+  - directional: a commitment to push in a clear direction, without a
+    checkable threshold ("I will fight to lower drug prices").
+  - rhetorical: a governing-values pledge with no named action ("I will
+    always put Maine families first"). Extract it — it is displayed for
+    context — but it is never scored. Generic pleasantries with no
+    governing content ("I love this state") are NOT promises at all.
 
 topic: one or two lowercase words, e.g. healthcare, taxes, veterans,
 housing, immigration, energy, abortion, guns, social_security, economy,
