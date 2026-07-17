@@ -182,9 +182,14 @@ def extract_promises_step(politician_id: int) -> dict[str, int]:
 
 @DBOS.step()
 def list_extraction_candidates_step() -> list[int]:
-    """Politicians that have documents awaiting extraction."""
+    """Politicians with documents awaiting extraction under the CURRENT
+    prompt+model (same predicate the per-document query uses)."""
     with db.connect() as conn:
-        return db.politicians_needing_extraction(conn)
+        return db.politicians_needing_extraction(
+            conn,
+            extraction_stage.PROMPT_VERSION,
+            get_settings().local_model or "unknown",
+        )
 
 
 # --- workflows ---------------------------------------------------------------

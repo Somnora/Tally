@@ -521,8 +521,13 @@ def insert_verified_promise(
     )
 
 
-def politicians_needing_extraction(conn: Connection) -> list[int]:
-    cur = conn.execute(load_sql("select_politicians_needing_extraction"))
+def politicians_needing_extraction(
+    conn: Connection, prompt_version: str, model_name: str
+) -> list[int]:
+    cur = conn.execute(
+        load_sql("select_politicians_needing_extraction"),
+        {"prompt_version": prompt_version, "model_name": model_name},
+    )
     return sorted(int(r[0]) for r in cur.fetchall())
 
 
