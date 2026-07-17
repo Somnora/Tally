@@ -58,6 +58,7 @@ def seed(conn: db.Connection, raw: bytes, source_id: int) -> dict[str, int]:
             govtrack_id=ids.get("govtrack"),
             icpsr_id=ids.get("icpsr"),
             opensecrets_id=ids.get("opensecrets"),
+            lis_id=ids.get("lis"),  # senators only; senate.gov roll calls key on this
             source_id=source_id,
         )
         upserted += 1

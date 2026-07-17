@@ -83,6 +83,7 @@ def upsert_crosswalk(
     govtrack_id: int | None,
     icpsr_id: int | None,
     opensecrets_id: str | None,
+    lis_id: str | None,
     source_id: int,
 ) -> None:
     conn.execute(
@@ -94,6 +95,7 @@ def upsert_crosswalk(
             "govtrack_id": govtrack_id,
             "icpsr_id": icpsr_id,
             "opensecrets_id": opensecrets_id,
+            "lis_id": lis_id,
             "source_id": source_id,
         },
     )

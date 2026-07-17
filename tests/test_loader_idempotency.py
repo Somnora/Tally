@@ -29,6 +29,16 @@ LEGISLATORS_YAML = b"""
     first: Judy
     last: Chu
     official_full: Judy Chu
+- id:
+    bioguide: C001035
+    govtrack: 300025
+    lis: S252
+    fec: [S6ME00159]
+    opensecrets: N00000491
+  name:
+    first: Susan
+    last: Collins
+    official_full: Susan M. Collins
 """
 
 
@@ -60,15 +70,21 @@ def test_crosswalk_loader_is_idempotent(conn: db.Connection) -> None:
     source_id = _fixture_source(conn, "test_legislators")
 
     first = seed_crosswalk(conn, LEGISLATORS_YAML, source_id)
-    assert first == {"upserted": 2, "skipped": 0}
-    assert db.count_rows(conn, "id_crosswalk") == 2
+    assert first == {"upserted": 3, "skipped": 0}
+    assert db.count_rows(conn, "id_crosswalk") == 3
 
     second = seed_crosswalk(conn, LEGISLATORS_YAML, source_id)
-    assert second == {"upserted": 2, "skipped": 0}
-    assert db.count_rows(conn, "id_crosswalk") == 2
+    assert second == {"upserted": 3, "skipped": 0}
+    assert db.count_rows(conn, "id_crosswalk") == 3
 
     found = db.lookup_crosswalk_by_fec_id(conn, "H0CA32101")
     assert found == ("C001080", "Judy Chu")
+
+    # Senators carry a LIS id (senate.gov roll-call key); House members don't.
+    lis = conn.execute(
+        "SELECT bioguide_id, lis_id FROM id_crosswalk ORDER BY bioguide_id"
+    ).fetchall()
+    assert dict(lis) == {"C001035": "S252", "C001080": None, "T000487": None}
 
 
 def test_source_rows_dedupe_on_content_hash(conn: db.Connection) -> None:
