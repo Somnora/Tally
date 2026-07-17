@@ -1,0 +1,42 @@
+[project]
+name = "tally"
+version = "0.1.0"
+description = "Civic transparency platform: campaign finance, promises, and voting records for the 2026 US midterms"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx==0.28.1",
+    "psycopg[binary]==3.3.4",
+    "pydantic-settings==2.14.2",
+    "pyyaml==6.0.3",
+]
+
+[tool.uv]
+# This repo is a collection of scripts/modules run in place, not an installable package.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F: pycodestyle + pyflakes, I: isort, UP: modernize, B: bugbear (likely bugs)
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+# Strict on pipeline code (it crosses trust boundaries); tests stay at basic.
+strict = ["pipeline"]
+include = ["pipeline", "tests", "db"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "pyright==1.1.411",
+    "pytest==9.1.1",
+    "ruff==0.15.22",
+]

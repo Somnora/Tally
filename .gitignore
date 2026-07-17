@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+
+# Secrets — never commit real keys; .env.example is the committed template
+.env
+
+# macOS
+.DS_Store
+
+# Downloaded data (FEC bulk archives, legislators YAML, etc.)
+data/raw/
