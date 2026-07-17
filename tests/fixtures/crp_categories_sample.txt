@@ -1,0 +1,8 @@
+CRP Categories -- sample fixture for tests (structure mirrors the real file)
+Documentation preamble line that the parser must skip.
+
+Catcode	Catname	Catorder	Industry	Sector	Sector Long
+A1000	Crop production & basic processing	A01	Crop Production & Basic Processing	Agribusiness	Agribusiness
+A1100	Sugar cane & sugar beets	A01	Crop Production & Basic Processing	Agribusiness	Agribusiness
+E1100	Oil & Gas	E01	Oil & Gas	Energy/Nat Resource	Energy & Natural Resources
+H4300	Health services	H04	Health Services/HMOs	Health	Health

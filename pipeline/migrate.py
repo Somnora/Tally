@@ -22,13 +22,6 @@ from pipeline.config import get_settings
 
 DB_DIR = Path(__file__).resolve().parent.parent / "db"
 
-# The baseline files CLAUDE.md names, applied as migrations 0001/0002.
-# Files in db/migrations/ must be numbered 0003 or higher.
-BASELINE: list[tuple[str, Path]] = [
-    ("0001_schema.sql", DB_DIR / "schema.sql"),
-    ("0002_schema_additions.sql", DB_DIR / "schema_additions.sql"),
-]
-
 ENSURE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
     filename   TEXT PRIMARY KEY,
@@ -44,18 +37,24 @@ class Migration:
     path: Path
 
 
-def discover_migrations() -> list[Migration]:
-    """Baseline first, then db/migrations/*.sql sorted by filename."""
-    migrations = [Migration(name, path) for name, path in BASELINE]
-    migrations_dir = DB_DIR / "migrations"
-    for path in sorted(migrations_dir.glob("*.sql")):
+def discover_migrations(db_dir: Path = DB_DIR) -> list[Migration]:
+    """Baseline first, then <db_dir>/migrations/*.sql sorted by filename.
+
+    The baseline files CLAUDE.md names are applied as migrations 0001/0002;
+    files in migrations/ must be numbered 0003 or higher.
+    """
+    migrations = [
+        Migration("0001_schema.sql", db_dir / "schema.sql"),
+        Migration("0002_schema_additions.sql", db_dir / "schema_additions.sql"),
+    ]
+    for path in sorted((db_dir / "migrations").glob("*.sql")):
         if path.name <= "0002":
             raise SystemExit(f"{path.name}: migrations must be numbered 0003 or higher")
         migrations.append(Migration(path.name, path))
     return migrations
 
 
-def apply_migrations(database_url: str) -> list[str]:
+def apply_migrations(database_url: str, db_dir: Path = DB_DIR) -> list[str]:
     """Apply all pending migrations; return the names of those applied."""
     applied_now: list[str] = []
     with psycopg.connect(database_url) as conn:
@@ -69,7 +68,7 @@ def apply_migrations(database_url: str) -> list[str]:
             ).fetchall()
         }
 
-        for migration in discover_migrations():
+        for migration in discover_migrations(db_dir):
             sql_text = migration.path.read_text(encoding="utf-8")
             digest = hashlib.sha256(sql_text.encode("utf-8")).hexdigest()
 

@@ -17,6 +17,8 @@ package = false
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# docs/ingestion_blueprint.py is a reference pattern, not runnable code
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 # E/F: pycodestyle + pyflakes, I: isort, UP: modernize, B: bugbear (likely bugs)
@@ -33,6 +35,7 @@ include = ["pipeline", "tests", "db"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+pythonpath = ["."]  # repo root on sys.path: pipeline/ is run in place, not installed
 
 [dependency-groups]
 dev = [
