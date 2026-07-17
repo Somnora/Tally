@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     dbos_system_database_url: str = "postgresql://localhost/civic_dbos"
 
     fec_api_key: SecretStr = SecretStr("")
+    # Spare FEC key, used only if the primary hits its rate limit
+    fec_api_key_backup: SecretStr = SecretStr("")
     congress_gov_api_key: SecretStr = SecretStr("")
+    lda_api_key: SecretStr = SecretStr("")
     youtube_api_key: SecretStr = SecretStr("")
 
     # GPU-dependent stages (transcription, local LLM) run on Lambda instances,
