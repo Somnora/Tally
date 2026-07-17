@@ -1,12 +1,17 @@
-"""DBOS workflows: durable per-candidate ingestion (Milestone 2: finance only).
+"""DBOS workflows: durable ingestion (finance per candidate, votes per chamber).
 
-The blueprint pattern, live: a coordinator workflow enqueues ONE workflow per
-candidate — a failure on one candidate never blocks the others, and a crash
-resumes from the last completed step (state lives in the civic_dbos Postgres
-database, not in this process).
+The blueprint pattern, live: coordinators enqueue independent workflows — a
+failure on one never blocks the others, and a crash resumes from the last
+completed step (state lives in the civic_dbos Postgres database, not in this
+process).
 
 Run:
-    uv run python -m pipeline.workflows --state ME
+    uv run python -m pipeline.workflows finance --state ME
+    uv run python -m pipeline.workflows votes --congress 119
+
+Finance syncs per candidate (candidate-specific API data); votes sync per
+chamber-session in batched steps, because all members share the same roll
+calls — fetching them per candidate would repeat identical work 435 times.
 
 Verified against installed dbos 2.27.0: DBOSConfig(name, system_database_url),
 @DBOS.step(retries_allowed/max_attempts/interval_seconds/backoff_rate),
@@ -21,7 +26,10 @@ from dbos import DBOS, DBOSConfig, Queue
 
 from pipeline import db
 from pipeline.config import get_settings
+from pipeline.etl import congress_votes
 from pipeline.stages.sync_finance import sync_finance
+
+VOTE_BATCH_SIZE = 25  # roll calls per durable step (~30s of fetching each)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +82,32 @@ def refresh_views_step() -> None:
         db.refresh_finance_views(conn)
 
 
+# --- vote steps ---------------------------------------------------------------
+
+@DBOS.step()
+def ensure_members_step() -> int:
+    with db.connect() as conn:
+        return congress_votes.ensure_member_politicians(conn)
+
+
+@DBOS.step(retries_allowed=True, max_attempts=4, interval_seconds=10, backoff_rate=2.0)
+def list_new_rolls_step(chamber: str, congress: int, session: int) -> list[int]:
+    with db.connect() as conn:
+        if chamber == "house":
+            return congress_votes.list_new_house_rolls(conn, congress, session)
+        return congress_votes.list_new_senate_numbers(conn, congress, session)
+
+
+@DBOS.step(retries_allowed=True, max_attempts=4, interval_seconds=10, backoff_rate=2.0)
+def load_rolls_batch_step(
+    chamber: str, congress: int, session: int, rolls: list[int]
+) -> dict[str, int]:
+    with db.connect() as conn:
+        if chamber == "house":
+            return congress_votes.load_house_rolls(conn, congress, session, rolls)
+        return congress_votes.load_senate_votes(conn, congress, session, rolls)
+
+
 # --- workflows ---------------------------------------------------------------
 
 @DBOS.workflow()
@@ -118,16 +152,70 @@ def state_finance_run(state: str, cycle: int) -> dict[str, int]:
     return totals
 
 
+@DBOS.workflow()
+def chamber_votes_workflow(chamber: str, congress: int, session: int) -> dict[str, int]:
+    """Sync one chamber-session incrementally, in durable batches."""
+    run_id = start_votes_run_step(f"sync_votes_{chamber}_{congress}_{session}")
+    try:
+        rolls = list_new_rolls_step(chamber, congress, session)
+        stats: dict[str, int] = {"new_rolls": len(rolls)}
+        for start in range(0, len(rolls), VOTE_BATCH_SIZE):
+            batch = rolls[start : start + VOTE_BATCH_SIZE]
+            for key, value in load_rolls_batch_step(chamber, congress, session, batch).items():
+                stats[key] = stats.get(key, 0) + value
+    except Exception as exc:
+        finish_run_step(run_id, "failed", {}, str(exc))
+        raise
+    finish_run_step(run_id, "succeeded", stats)
+    return stats
+
+
+@DBOS.step()
+def start_votes_run_step(run_type: str) -> int:
+    with db.connect() as conn:
+        return db.start_run(conn, run_type, None)
+
+
+@DBOS.workflow()
+def votes_run(congress: int, sessions: list[int]) -> dict[str, int]:
+    """Coordinator: both chambers, all sessions, in parallel on the queue."""
+    ensure_members_step()
+    handles = [
+        candidate_queue.enqueue(chamber_votes_workflow, chamber, congress, session)
+        for chamber in ("house", "senate")
+        for session in sessions
+    ]
+    totals: dict[str, int] = {"chamber_sessions": len(handles), "failed_chamber_sessions": 0}
+    for handle in handles:
+        try:
+            for key, value in handle.get_result().items():
+                totals[key] = totals.get(key, 0) + value
+        except Exception:
+            totals["failed_chamber_sessions"] += 1
+    return totals
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--state", required=True)
-    parser.add_argument("--cycle", type=int, default=2026)
-    args = parser.parse_args()
+    sub = parser.add_subparsers(dest="command", required=True)
 
+    finance = sub.add_parser("finance", help="official FEC totals per candidate")
+    finance.add_argument("--state", required=True)
+    finance.add_argument("--cycle", type=int, default=2026)
+
+    votes = sub.add_parser("votes", help="roll-call votes for both chambers")
+    votes.add_argument("--congress", type=int, default=119)
+    votes.add_argument("--sessions", default="1,2", help="comma-separated, e.g. 1,2")
+
+    args = parser.parse_args()
     DBOS.launch()
     try:
-        totals = state_finance_run(args.state.upper(), args.cycle)
+        if args.command == "finance":
+            totals = state_finance_run(args.state.upper(), args.cycle)
+        else:
+            sessions = [int(s) for s in str(args.sessions).split(",") if s.strip()]
+            totals = votes_run(args.congress, sessions)
         for key in sorted(totals):
             logger.info("%-24s %d", key, totals[key])
     finally:

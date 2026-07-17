@@ -343,6 +343,46 @@ def refresh_finance_views(conn: Connection) -> None:
     conn.execute(load_sql("refresh_finance_views"))
 
 
+# -- votes (Milestone 3) -------------------------------------------------------
+
+def max_roll_call(conn: Connection, chamber: str, congress: int, session: int) -> int:
+    """Newest roll call already stored — the incremental-sync watermark."""
+    return _returned_id(
+        conn.execute(
+            load_sql("select_max_roll_call"),
+            {"chamber": chamber, "congress": congress, "session": session},
+        )
+    )
+
+
+def upsert_voting_records_bulk(conn: Connection, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(load_sql("voting_record_upsert"), rows)
+
+
+def member_politician_maps(conn: Connection) -> tuple[dict[str, int], dict[str, int]]:
+    """(bioguide -> politician_id, lis -> politician_id) for vote attribution."""
+    by_bioguide: dict[str, int] = {}
+    by_lis: dict[str, int] = {}
+    for bioguide, lis, politician_id in conn.execute(
+        load_sql("select_member_politicians")
+    ).fetchall():
+        by_bioguide[str(bioguide)] = int(politician_id)
+        if lis is not None:
+            by_lis[str(lis)] = int(politician_id)
+    return by_bioguide, by_lis
+
+
+def crosswalk_members(conn: Connection) -> list[tuple[str, str, int]]:
+    """(bioguide_id, full_name, source_id) for every current member."""
+    return [
+        (str(r[0]), str(r[1]), int(r[2]))
+        for r in conn.execute(load_sql("select_crosswalk_members")).fetchall()
+    ]
+
+
 # -- ingestion_runs ----------------------------------------------------------
 
 def start_run(conn: Connection, run_type: str, politician_id: int | None = None) -> int:
