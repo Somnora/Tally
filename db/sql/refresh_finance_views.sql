@@ -1,0 +1,2 @@
+REFRESH MATERIALIZED VIEW mv_candidacy_finance;
+REFRESH MATERIALIZED VIEW mv_top_committee_donors;

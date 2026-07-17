@@ -11,7 +11,8 @@ from pipeline import migrate
 
 def test_apply_then_noop(scratch_db: str) -> None:
     applied = migrate.apply_migrations(scratch_db)
-    assert applied == ["0001_schema.sql", "0002_schema_additions.sql"]
+    assert applied[:2] == ["0001_schema.sql", "0002_schema_additions.sql"]
+    assert "0003_finance.sql" in applied
 
     # Second run: everything is recorded, nothing re-applies.
     assert migrate.apply_migrations(scratch_db) == []

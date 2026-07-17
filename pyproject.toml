@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Civic transparency platform: campaign finance, promises, and voting records for the 2026 US midterms"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "dbos==2.27.0",
     "httpx==0.28.1",
     "psycopg[binary]==3.3.4",
     "pydantic-settings==2.14.2",

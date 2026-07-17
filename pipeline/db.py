@@ -7,6 +7,7 @@ Rules enforced here:
     success and rolls back on exception (psycopg connection semantics).
 """
 
+from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from typing import Any, LiteralString, cast
@@ -277,6 +278,61 @@ def upsert_candidacy(
             },
         )
     )
+
+
+# -- finance (Milestone 2) ---------------------------------------------------
+
+@dataclass(frozen=True)
+class Candidacy:
+    """One row of select_state_candidacies — the unit of finance sync work."""
+
+    candidacy_id: int
+    politician_id: int
+    fec_candidate_id: str
+    principal_cmte_id: str | None
+    full_name: str
+    office: str
+    district: str | None
+    is_special: bool
+
+
+def state_candidacies(conn: Connection, state: str, cycle: int) -> list[Candidacy]:
+    cur = conn.execute(load_sql("select_state_candidacies"), {"state": state, "cycle": cycle})
+    return [
+        Candidacy(
+            candidacy_id=int(r[0]),
+            politician_id=int(r[1]),
+            fec_candidate_id=str(r[2]),
+            principal_cmte_id=None if r[3] is None else str(r[3]),
+            full_name=str(r[4]),
+            office=str(r[5]),
+            district=None if r[6] is None else str(r[6]),
+            is_special=bool(r[7]),
+        )
+        for r in cur.fetchall()
+    ]
+
+
+def state_committee_ids(conn: Connection, state: str, cycle: int) -> set[str]:
+    """Committees attached to a state's candidates (indiv-file filter set)."""
+    cur = conn.execute(load_sql("select_state_committee_ids"), {"state": state, "cycle": cycle})
+    return {str(r[0]) for r in cur.fetchall()}
+
+
+def upsert_donations_bulk(conn: Connection, rows: list[dict[str, Any]]) -> None:
+    """Upsert many itemized donation rows (keyed on fec_sub_id)."""
+    if not rows:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(load_sql("donation_upsert"), rows)
+
+
+def upsert_candidate_totals(conn: Connection, totals: dict[str, Any]) -> None:
+    conn.execute(load_sql("candidate_totals_upsert"), totals)
+
+
+def refresh_finance_views(conn: Connection) -> None:
+    conn.execute(load_sql("refresh_finance_views"))
 
 
 # -- ingestion_runs ----------------------------------------------------------
