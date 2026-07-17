@@ -5,14 +5,15 @@ For every federal race, it shows who is running, where their money comes
 from, what they promised, and how their votes align with both. Full brief:
 [CLAUDE.md](CLAUDE.md). Public methodology: [docs/methodology.md](docs/methodology.md).
 
-## Status: Milestone 2 complete (finance pipeline, Maine pilot)
+## Status: Milestone 3 complete (finance + votes)
 
-Database schema, reference data, 2026 FEC masters, and the full finance
-pipeline for one pilot state (Maine) are live: itemized contributions and
-independent expenditures from bulk files, official totals from the OpenFEC
-API via durable per-candidate DBOS workflows, and rollup materialized views
-with an official-vs-loaded consistency check. Extraction and evaluation
-stages remain typed stubs (`pipeline/stages/`).
+Database schema, reference data, 2026 FEC masters, the finance pipeline for
+the Maine pilot, and the full 119th Congress voting record are live.
+House votes come from the Congress.gov API, Senate votes from senate.gov
+roll-call XML (the API has no Senate endpoint); both sync incrementally
+through durable DBOS workflows and store every member's position, so
+adding states never refetches votes. Extraction and evaluation stages
+remain typed stubs (`pipeline/stages/`).
 
 | Loaded | Count |
 |---|---|
@@ -22,6 +23,7 @@ stages remain typed stubs (`pipeline/stages/`).
 | politicians / candidacies (2026) | 4,079 |
 | donations (ME pilot: itemized + IEs) | 99,280 |
 | candidate_totals (ME, official FEC aggregates) | 25 |
+| voting_records (119th Congress, all members) | 344,425 |
 
 ## Setup
 
@@ -54,9 +56,12 @@ uv run python -m pipeline.etl.fec_itemized --state ME
 
 # 5. Official FEC totals per candidate (durable DBOS workflows, one per
 #    candidate; needs FEC_API_KEY in .env and the civic_dbos database)
-uv run python -m pipeline.workflows --state ME
+uv run python -m pipeline.workflows finance --state ME
 
-# 6. Verification report: official vs loaded, with divergences flagged
+# 6. Roll-call votes, both chambers, incremental (needs CONGRESS_GOV_API_KEY)
+uv run python -m pipeline.workflows votes --congress 119
+
+# 7. Verification report: finance cross-check + incumbent voting summary
 uv run python -m pipeline.report --state ME
 ```
 

@@ -64,6 +64,25 @@ Accounting rules applied to itemized records:
 - Amended filings replace earlier versions of the same record rather than
   being counted twice.
 
+## How voting records are collected
+
+Roll-call votes come directly from each chamber's official record: House
+votes from the Congress.gov API (which mirrors the House Clerk's records)
+and Senate votes from the Senate's own published roll-call XML. For every
+vote we display, you can click through to the official government page for
+that roll call.
+
+- A member's position is stored exactly as the chamber recorded it,
+  normalized only across vocabulary (the House says "Aye", the Senate says
+  "Yea"; both mean yes).
+- Impeachment votes are kept as Guilty or Not Guilty, never converted to
+  yes or no.
+- Procedural events that are not positions, such as Speaker elections where
+  the recorded vote is a candidate's name, are excluded rather than
+  reinterpreted.
+- Each vote shows the chamber's outcome alongside the member's position, so
+  you can see whether the member was in the majority.
+
 ## How promises are verified
 
 A promise only appears in the app when its quote passed an exact text match.

@@ -64,6 +64,22 @@ def main() -> None:
         print(f"\nDivergence over {DIVERGENCE_FLAG:.0%} (bulk-file lag or loader bug):")
         for line in flagged:
             print(line)
+
+    with db.connect() as conn:
+        votes = conn.execute(
+            db.load_sql("report_state_votes"), {"state": state, "cycle": args.cycle}
+        ).fetchall()
+    if votes:
+        print(f"\nVoting records ({state} incumbents, 119th Congress):\n")
+        vote_header = (f"{'incumbent':<26} {'chamber':<8} {'votes':>6} {'yea':>5} "
+                       f"{'nay':>5} {'present':>8} {'missed':>7} {'participation':>14} "
+                       f"{'latest':>11}")
+        print(vote_header)
+        print("-" * len(vote_header))
+        for name, chamber, recorded, yea, nay, present, not_voting, latest in votes:
+            participation = 100 * (recorded - not_voting) / recorded if recorded else 0
+            print(f"{name[:26]:<26} {chamber:<8} {recorded:>6} {yea:>5} {nay:>5} "
+                  f"{present:>8} {not_voting:>7} {participation:>13.1f}% {str(latest):>11}")
     print()
 
 
