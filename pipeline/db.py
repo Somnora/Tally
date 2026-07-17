@@ -98,10 +98,11 @@ def upsert_crosswalk(
     )
 
 
-def lookup_bioguide_for_fec_id(conn: Connection, fec_candidate_id: str) -> str | None:
+def lookup_crosswalk_by_fec_id(conn: Connection, fec_candidate_id: str) -> tuple[str, str] | None:
+    """Return (bioguide_id, full_name) for a known FEC candidate id, else None."""
     cur = conn.execute(load_sql("crosswalk_lookup_fec_id"), {"fec_candidate_id": fec_candidate_id})
     row = cur.fetchone()
-    return None if row is None else str(row[0])
+    return None if row is None else (str(row[0]), str(row[1]))
 
 
 # -- industry_codes ----------------------------------------------------------
@@ -210,6 +211,14 @@ def upsert_committee(
             "source_id": source_id,
         },
     )
+
+
+def upsert_committees_bulk(conn: Connection, rows: list[dict[str, Any]]) -> None:
+    """Upsert many committees in one round trip (executemany pipelines these)."""
+    if not rows:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(load_sql("committee_upsert"), rows)
 
 
 # -- races / candidacies -----------------------------------------------------
