@@ -30,6 +30,7 @@ from dbos import DBOS, DBOSConfig, Queue
 from pipeline import db
 from pipeline.config import get_settings
 from pipeline.etl import congress_votes
+from pipeline.stages import extract_promises as extraction_stage
 from pipeline.stages import sync_documents as documents_stage
 from pipeline.stages.sync_finance import sync_finance
 
@@ -171,6 +172,21 @@ def _merge_stats(into: dict[str, int], other: dict[str, int]) -> None:
         into[key] = into.get(key, 0) + value
 
 
+# --- extraction steps ----------------------------------------------------------
+
+@DBOS.step(retries_allowed=True, max_attempts=3, interval_seconds=30, backoff_rate=2.0)
+def extract_promises_step(politician_id: int) -> dict[str, int]:
+    with db.connect() as conn:
+        return extraction_stage.extract_promises(conn, politician_id)
+
+
+@DBOS.step()
+def list_extraction_candidates_step() -> list[int]:
+    """Politicians that have documents awaiting extraction."""
+    with db.connect() as conn:
+        return db.politicians_needing_extraction(conn)
+
+
 # --- workflows ---------------------------------------------------------------
 
 @DBOS.workflow()
@@ -298,6 +314,36 @@ def votes_run(congress: int, sessions: list[int]) -> dict[str, int]:
     return totals
 
 
+@DBOS.workflow()
+def candidate_extraction_workflow(politician_id: int) -> dict[str, int]:
+    run_id = start_run_step("extract_promises", politician_id)
+    try:
+        stats = extract_promises_step(politician_id)
+    except Exception as exc:
+        finish_run_step(run_id, "failed", {}, str(exc))
+        raise
+    finish_run_step(run_id, "succeeded", stats)
+    return stats
+
+
+@DBOS.workflow()
+def extraction_run() -> dict[str, int]:
+    """Coordinator: one extraction workflow per candidate with pending docs."""
+    politician_ids = list_extraction_candidates_step()
+    logger.info("extraction for %d candidates with pending documents", len(politician_ids))
+    handles = [
+        candidate_queue.enqueue(candidate_extraction_workflow, pid)
+        for pid in politician_ids
+    ]
+    totals: dict[str, int] = {"candidates": len(handles), "failed_candidates": 0}
+    for handle in handles:
+        try:
+            _merge_stats(totals, handle.get_result())
+        except Exception:
+            totals["failed_candidates"] += 1
+    return totals
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
@@ -315,6 +361,8 @@ def main() -> None:
     documents.add_argument("--seed", default="data/seeds/me_pilot.yaml")
     documents.add_argument("--cycle", type=int, default=2026)
 
+    sub.add_parser("extract", help="LLM promise extraction (needs VLLM_BASE_URL)")
+
     args = parser.parse_args()
     DBOS.launch()
     try:
@@ -322,6 +370,14 @@ def main() -> None:
             totals = state_finance_run(args.state.upper(), args.cycle)
         elif args.command == "documents":
             totals = documents_run(args.seed, args.cycle)
+        elif args.command == "extract":
+            settings = get_settings()
+            if not settings.vllm_base_url or not settings.local_model:
+                raise SystemExit(
+                    "extract needs a model endpoint: set VLLM_BASE_URL and LOCAL_MODEL "
+                    "in .env (start a vllm-serve or sglang-serve job in Manifold first)"
+                )
+            totals = extraction_run()
         else:
             sessions = [int(s) for s in str(args.sessions).split(",") if s.strip()]
             totals = votes_run(args.congress, sessions)

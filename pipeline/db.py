@@ -461,6 +461,81 @@ def upsert_media_asset(
     )
 
 
+# -- promises / extraction (Milestone 4) ---------------------------------------
+
+@dataclass(frozen=True)
+class DocumentForExtraction:
+    document_id: int
+    doc_type: str
+    title: str | None
+    url: str
+    full_text: str
+
+
+def documents_for_extraction(
+    conn: Connection, politician_id: int, prompt_version: str, model_name: str
+) -> list[DocumentForExtraction]:
+    cur = conn.execute(
+        load_sql("select_documents_for_extraction"),
+        {"politician_id": politician_id, "prompt_version": prompt_version,
+         "model_name": model_name},
+    )
+    return [
+        DocumentForExtraction(
+            document_id=int(r[0]), doc_type=str(r[1]),
+            title=None if r[2] is None else str(r[2]),
+            url=str(r[3]), full_text=str(r[4]),
+        )
+        for r in cur.fetchall()
+    ]
+
+
+def insert_verified_promise(
+    conn: Connection,
+    *,
+    politician_id: int,
+    document_id: int,
+    verbatim_quote: str,
+    char_start: int,
+    char_end: int,
+    topic: str,
+    specificity: str,
+    model_name: str,
+    prompt_version: str,
+) -> None:
+    """Store a promise whose quote already passed verify_quote. Idempotent."""
+    conn.execute(
+        load_sql("promise_insert"),
+        {
+            "politician_id": politician_id,
+            "document_id": document_id,
+            "verbatim_quote": verbatim_quote,
+            "char_start": char_start,
+            "char_end": char_end,
+            "topic": topic,
+            "specificity": specificity,
+            "is_scoreable": specificity != "rhetorical",
+            "model_name": model_name,
+            "prompt_version": prompt_version,
+        },
+    )
+
+
+def politicians_needing_extraction(conn: Connection) -> list[int]:
+    cur = conn.execute(load_sql("select_politicians_needing_extraction"))
+    return sorted(int(r[0]) for r in cur.fetchall())
+
+
+def mark_document_extracted(
+    conn: Connection, document_id: int, model_name: str, prompt_version: str
+) -> None:
+    conn.execute(
+        load_sql("update_document_extracted"),
+        {"document_id": document_id, "model_name": model_name,
+         "prompt_version": prompt_version},
+    )
+
+
 # -- ingestion_runs ----------------------------------------------------------
 
 def start_run(conn: Connection, run_type: str, politician_id: int | None = None) -> int:
