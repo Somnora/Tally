@@ -1,0 +1,51 @@
+# Milestone 4 pilot: document sources for Maine's 2026 general-election field.
+#
+# Curated 2026-07-17 from web research (campaign sites verified by visiting
+# search results, primary outcomes per AP/Maine SoS reporting). This file is
+# itself ingested as a sources row before any documents derived from it are
+# stored. Update history lives in git.
+#
+# Notes reflecting the race as of curation date:
+#   - ME Senate: Platner (D primary winner) withdrew 2026-07-08; the Maine
+#     Democratic Party names a replacement nominee by 2026-07-27. Add the new
+#     nominee here when chosen.
+#   - ME-02 is open (Golden retiring): Dunlap (D) vs LePage (R).
+
+cycle: 2026
+state: ME
+candidates:
+  - fec_candidate_id: S6ME00159
+    display_name: Susan Collins
+    campaign_url: https://susancollins.com/
+    youtube_queries:
+      - Susan Collins town hall
+      - Susan Collins interview 2026
+      - Susan Collins Senate debate
+
+  - fec_candidate_id: H8ME01120
+    display_name: Chellie Pingree
+    campaign_url: https://www.chelliepingree.com/
+    youtube_queries:
+      - Chellie Pingree town hall
+      - Chellie Pingree interview 2026
+
+  - fec_candidate_id: H4ME01160
+    display_name: Ron Russell
+    campaign_url: https://ronrussellforcongress.com/
+    youtube_queries:
+      - Ron Russell Maine Congress interview
+      - Ron Russell Maine first district
+
+  - fec_candidate_id: H6ME02171
+    display_name: Matt Dunlap
+    campaign_url: https://www.mattdunlapforuscongress.com/
+    youtube_queries:
+      - Matt Dunlap Maine Congress interview
+      - Matt Dunlap town hall 2026
+
+  - fec_candidate_id: H6ME02148
+    display_name: Paul LePage
+    campaign_url: https://lepageforcongress.com/
+    youtube_queries:
+      - Paul LePage Congress interview 2026
+      - Paul LePage town hall

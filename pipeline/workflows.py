@@ -19,15 +19,21 @@ Queue(name, concurrency), Queue.enqueue -> WorkflowHandle.get_result().
 """
 
 import argparse
+import hashlib
 import logging
+from pathlib import Path
 from typing import Any
 
+import yaml
 from dbos import DBOS, DBOSConfig, Queue
 
 from pipeline import db
 from pipeline.config import get_settings
 from pipeline.etl import congress_votes
+from pipeline.stages import sync_documents as documents_stage
 from pipeline.stages.sync_finance import sync_finance
+
+SEED_URL_BASE = "https://github.com/Somnora/Tally/blob/main"
 
 VOTE_BATCH_SIZE = 25  # roll calls per durable step (~30s of fetching each)
 
@@ -108,7 +114,104 @@ def load_rolls_batch_step(
         return congress_votes.load_senate_votes(conn, congress, session, rolls)
 
 
+# --- document steps -----------------------------------------------------------
+
+@DBOS.step(retries_allowed=True, max_attempts=3, interval_seconds=10, backoff_rate=2.0)
+def documents_site_step(politician_id: int, campaign_url: str) -> dict[str, Any]:
+    with db.connect() as conn:
+        return documents_stage.sync_campaign_site(conn, politician_id, campaign_url)
+
+
+@DBOS.step(retries_allowed=True, max_attempts=3, interval_seconds=10, backoff_rate=2.0)
+def documents_wayback_step(politician_id: int, page_urls: list[str]) -> dict[str, int]:
+    with db.connect() as conn:
+        return documents_stage.sync_wayback(conn, politician_id, page_urls)
+
+
+@DBOS.step(retries_allowed=True, max_attempts=3, interval_seconds=10, backoff_rate=2.0)
+def documents_youtube_step(
+    politician_id: int, queries: list[str], required_name: str
+) -> dict[str, int]:
+    with db.connect() as conn:
+        return documents_stage.sync_youtube(conn, politician_id, queries, required_name)
+
+
+@DBOS.step()
+def load_seed_step(seed_path: str, cycle: int) -> list[dict[str, Any]]:
+    """Ingest the curated seed file itself as a source, resolve politicians."""
+    raw = Path(seed_path).read_bytes()
+    seed: dict[str, Any] = yaml.safe_load(raw)
+    with db.connect() as conn:
+        db.insert_source(
+            conn, source_type="curated_seed",
+            url=f"{SEED_URL_BASE}/{seed_path}",
+            content_hash=hashlib.sha256(raw).hexdigest(), raw_payload=raw,
+        )
+        resolved: list[dict[str, Any]] = []
+        seed_candidates: list[dict[str, Any]] = seed.get("candidates") or []
+        for candidate in seed_candidates:
+            fec_id = str(candidate["fec_candidate_id"])
+            politician_id = db.politician_id_for_fec(conn, fec_id, cycle)
+            if politician_id is None:
+                logger.warning("seed candidate %s (%s) has no candidacy row; skipping",
+                               candidate.get("display_name"), fec_id)
+                continue
+            queries: list[Any] = candidate.get("youtube_queries") or []
+            resolved.append({
+                "politician_id": politician_id,
+                "display_name": str(candidate.get("display_name") or fec_id),
+                "campaign_url": str(candidate["campaign_url"]),
+                "youtube_queries": [str(q) for q in queries],
+            })
+    return resolved
+
+
+def _merge_stats(into: dict[str, int], other: dict[str, int]) -> None:
+    for key, value in other.items():
+        into[key] = into.get(key, 0) + value
+
+
 # --- workflows ---------------------------------------------------------------
+
+@DBOS.workflow()
+def candidate_documents_workflow(
+    politician_id: int, campaign_url: str, youtube_queries: list[str], required_name: str
+) -> dict[str, int]:
+    """Documents sync for one candidate: site, wayback, youtube — 3 durable steps."""
+    run_id = start_run_step("sync_documents", politician_id)
+    try:
+        site = documents_site_step(politician_id, campaign_url)
+        stats: dict[str, int] = dict(site["stats"])
+        _merge_stats(stats, documents_wayback_step(politician_id, list(site["page_urls"])))
+        _merge_stats(stats, documents_youtube_step(politician_id, youtube_queries, required_name))
+    except Exception as exc:
+        finish_run_step(run_id, "failed", {}, str(exc))
+        raise
+    finish_run_step(run_id, "succeeded", stats)
+    return stats
+
+
+@DBOS.workflow()
+def documents_run(seed_path: str, cycle: int) -> dict[str, int]:
+    """Coordinator: one documents workflow per seeded candidate."""
+    candidates = load_seed_step(seed_path, cycle)
+    logger.info("documents sync for %d seeded candidates", len(candidates))
+    handles = [
+        candidate_queue.enqueue(
+            candidate_documents_workflow,
+            c["politician_id"], c["campaign_url"], c["youtube_queries"],
+            # surname is the relevance needle for YouTube results
+            str(c["display_name"]).split()[-1],
+        )
+        for c in candidates
+    ]
+    totals: dict[str, int] = {"candidates": len(handles), "failed_candidates": 0}
+    for handle in handles:
+        try:
+            _merge_stats(totals, handle.get_result())
+        except Exception:
+            totals["failed_candidates"] += 1
+    return totals
 
 @DBOS.workflow()
 def candidate_finance_workflow(
@@ -208,11 +311,17 @@ def main() -> None:
     votes.add_argument("--congress", type=int, default=119)
     votes.add_argument("--sessions", default="1,2", help="comma-separated, e.g. 1,2")
 
+    documents = sub.add_parser("documents", help="campaign sites, wayback, youtube")
+    documents.add_argument("--seed", default="data/seeds/me_pilot.yaml")
+    documents.add_argument("--cycle", type=int, default=2026)
+
     args = parser.parse_args()
     DBOS.launch()
     try:
         if args.command == "finance":
             totals = state_finance_run(args.state.upper(), args.cycle)
+        elif args.command == "documents":
+            totals = documents_run(args.seed, args.cycle)
         else:
             sessions = [int(s) for s in str(args.sessions).split(",") if s.strip()]
             totals = votes_run(args.congress, sessions)

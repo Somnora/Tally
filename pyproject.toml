@@ -7,8 +7,11 @@ dependencies = [
     "dbos==2.27.0",
     "httpx==0.28.1",
     "psycopg[binary]==3.3.4",
+    "pydantic-ai-slim[openai]==2.12.0",
     "pydantic-settings==2.14.2",
     "pyyaml==6.0.3",
+    "trafilatura==2.1.0",
+    "youtube-transcript-api==1.2.4",
 ]
 
 [tool.uv]

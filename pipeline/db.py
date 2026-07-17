@@ -383,6 +383,84 @@ def crosswalk_members(conn: Connection) -> list[tuple[str, str, int]]:
     ]
 
 
+# -- documents / media (Milestone 4) -------------------------------------------
+
+def politician_id_for_fec(conn: Connection, fec_candidate_id: str, cycle: int) -> int | None:
+    cur = conn.execute(
+        load_sql("select_politician_for_fec"),
+        {"fec_candidate_id": fec_candidate_id, "cycle": cycle},
+    )
+    row = cur.fetchone()
+    return None if row is None else int(row[0])
+
+
+def insert_document(
+    conn: Connection,
+    *,
+    politician_id: int,
+    source_id: int,
+    doc_type: str,
+    title: str | None,
+    url: str,
+    published_at: str | None,
+    full_text: str,
+    content_hash: str,
+    transcribed_by: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> int:
+    """Idempotent on (politician_id, content_hash); returns document_id."""
+    return _returned_id(
+        conn.execute(
+            load_sql("document_insert"),
+            {
+                "politician_id": politician_id,
+                "source_id": source_id,
+                "doc_type": doc_type,
+                "title": title,
+                "url": url,
+                "published_at": published_at,
+                "full_text": full_text,
+                "content_hash": content_hash,
+                "transcribed_by": transcribed_by,
+                "meta": Jsonb(meta or {}),
+            },
+        )
+    )
+
+
+def upsert_media_asset(
+    conn: Connection,
+    *,
+    politician_id: int,
+    external_id: str,
+    title: str | None,
+    channel_title: str | None,
+    url: str,
+    published_at: str | None,
+    has_captions: bool | None,
+    document_id: int | None,
+    source_id: int,
+    platform: str = "youtube",
+) -> int:
+    return _returned_id(
+        conn.execute(
+            load_sql("media_asset_upsert"),
+            {
+                "politician_id": politician_id,
+                "platform": platform,
+                "external_id": external_id,
+                "title": title,
+                "channel_title": channel_title,
+                "url": url,
+                "published_at": published_at,
+                "has_captions": has_captions,
+                "document_id": document_id,
+                "source_id": source_id,
+            },
+        )
+    )
+
+
 # -- ingestion_runs ----------------------------------------------------------
 
 def start_run(conn: Connection, run_type: str, politician_id: int | None = None) -> int:
