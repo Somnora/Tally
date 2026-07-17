@@ -560,6 +560,68 @@ def delete_promises_for_document(conn: Connection, document_id: int) -> None:
     conn.execute(load_sql("promises_delete_for_document"), {"document_id": document_id})
 
 
+@dataclass(frozen=True)
+class ReviewItem:
+    promise_id: int
+    politician_name: str
+    doc_title: str
+    doc_type: str
+    url: str
+    verbatim_quote: str
+    topic: str
+    specificity: str
+    is_scoreable: bool
+    prompt_version: str
+    model_name: str
+    context_before: str
+    context_after: str
+
+
+def promises_for_review(conn: Connection, context_chars: int = 300) -> list[ReviewItem]:
+    """Promises with no human verdict yet, with surrounding document context."""
+    cur = conn.execute(
+        load_sql("select_promises_for_review"), {"context_chars": context_chars}
+    )
+    return [
+        ReviewItem(
+            promise_id=int(r[0]), politician_name=r[1], doc_title=r[2],
+            doc_type=r[3], url=r[4], verbatim_quote=r[5], topic=r[8],
+            specificity=r[9], is_scoreable=r[10],
+            prompt_version=r[11], model_name=r[12],
+            context_before=r[13] or "", context_after=r[14] or "",
+        )
+        for r in cur.fetchall()
+    ]
+
+
+def upsert_promise_review(
+    conn: Connection,
+    *,
+    promise_id: int,
+    verdict: str,
+    note: str | None,
+    prompt_version: str,
+    model_name: str,
+) -> None:
+    """Record (or overwrite) the human verdict on one promise."""
+    conn.execute(
+        load_sql("promise_review_upsert"),
+        {
+            "promise_id": promise_id,
+            "verdict": verdict,
+            "note": note,
+            "prompt_version": prompt_version,
+            "model_name": model_name,
+        },
+    )
+
+
+def review_summary(conn: Connection) -> list[tuple[str, str, int]]:
+    """(prompt_version, verdict, count) rows for the precision report."""
+    cur = conn.execute(load_sql("report_review_summary"))
+    return [(r[0], r[1], int(r[2])) for r in cur.fetchall()]
+
+
 def mark_document_extracted(
     conn: Connection, document_id: int, model_name: str, prompt_version: str
 ) -> None:
