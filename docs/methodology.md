@@ -36,6 +36,34 @@ source URL, the retrieval time, and a cryptographic hash of the raw payload.
 Deep links in the app point to the official record (fec.gov, congress.gov)
 wherever one exists.
 
+## How money data is assembled
+
+Campaign finance figures come from two independent FEC channels, and we
+show our work by keeping both:
+
+1. **Itemized records** from FEC bulk data: every contribution from a
+   committee to a candidate, every itemized individual contribution, and
+   every independent expenditure. Each record keeps the FEC image number,
+   which links to the actual scanned filing.
+2. **Official totals** from the FEC API: the FEC's own per-candidate
+   aggregates for the cycle.
+
+Comparing our itemized sums against the official totals is a permanent
+accuracy check. Divergence beyond normal bulk-processing lag is
+investigated before the affected numbers ship.
+
+Accounting rules applied to itemized records:
+
+- Memo-flagged rows (informational detail that would double-count money,
+  such as conduit earmark breakdowns) are excluded from all sums.
+- Contribution refunds are never counted as receipts; they are tracked in
+  their own column.
+- Independent expenditures are money spent about a candidate, not given to
+  them. They are reported separately as supporting or opposing, never mixed
+  into contribution totals.
+- Amended filings replace earlier versions of the same record rather than
+  being counted twice.
+
 ## How promises are verified
 
 A promise only appears in the app when its quote passed an exact text match.

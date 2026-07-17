@@ -5,12 +5,14 @@ For every federal race, it shows who is running, where their money comes
 from, what they promised, and how their votes align with both. Full brief:
 [CLAUDE.md](CLAUDE.md). Public methodology: [docs/methodology.md](docs/methodology.md).
 
-## Status: Milestone 1 complete
+## Status: Milestone 2 complete (finance pipeline, Maine pilot)
 
-Database schema, reference data, and the 2026 FEC bulk masters are loaded.
-Extraction, evaluation, and export stages exist as typed stubs only
-(`pipeline/stages/`), gated behind interfaces so GPU work can later run on
-Lambda instances without changing the data path.
+Database schema, reference data, 2026 FEC masters, and the full finance
+pipeline for one pilot state (Maine) are live: itemized contributions and
+independent expenditures from bulk files, official totals from the OpenFEC
+API via durable per-candidate DBOS workflows, and rollup materialized views
+with an official-vs-loaded consistency check. Extraction and evaluation
+stages remain typed stubs (`pipeline/stages/`).
 
 | Loaded | Count |
 |---|---|
@@ -18,6 +20,8 @@ Lambda instances without changing the data path.
 | committees (2026 master) | 20,173 |
 | races (435 House, 33 Senate class 2, 2 specials) | 470 |
 | politicians / candidacies (2026) | 4,079 |
+| donations (ME pilot: itemized + IEs) | 99,280 |
+| candidate_totals (ME, official FEC aggregates) | 25 |
 
 ## Setup
 
@@ -43,6 +47,17 @@ uv run python -m pipeline.etl.seed_industry_codes path/to/CRP_Categories.txt
 
 # 3. FEC candidate + committee masters, races, candidacies for a cycle
 uv run python -m pipeline.etl.fec_bulk --cycle 2026
+
+# 4. Itemized contributions + independent expenditures for one state
+#    (first run downloads the 1.7 GB indiv file once; cached afterwards)
+uv run python -m pipeline.etl.fec_itemized --state ME
+
+# 5. Official FEC totals per candidate (durable DBOS workflows, one per
+#    candidate; needs FEC_API_KEY in .env and the civic_dbos database)
+uv run python -m pipeline.workflows --state ME
+
+# 6. Verification report: official vs loaded, with divergences flagged
+uv run python -m pipeline.report --state ME
 ```
 
 Every loader records the raw download as a `sources` row (URL, retrieval

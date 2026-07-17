@@ -98,7 +98,7 @@ def test_candidate_totals_upsert_updates_in_place(conn: db.Connection) -> None:
     assert receipts is not None and int(receipts[0]) == 150000
 
 
-def test_finance_views_roll_up_and_exclude_memo_and_ie(conn: db.Connection) -> None:
+def test_finance_views_roll_up_and_exclude_memo_ie_and_refunds(conn: db.Connection) -> None:
     politician_id, source_id = _seed_candidate(conn)
     rows = [
         _donation_row(politician_id, source_id),  # PAC direct, 5000
@@ -108,18 +108,26 @@ def test_finance_views_roll_up_and_exclude_memo_and_ie(conn: db.Connection) -> N
                       recipient_cmte_id=None, transaction_tp="24E", amount=20000),  # IE support
         _donation_row(politician_id, source_id, fec_sub_id="4020260004",
                       recipient_cmte_id=None, transaction_tp="24A", amount=30000),  # IE oppose
+        _donation_row(politician_id, source_id, fec_sub_id="4020260005",
+                      contributor_cmte_id=None, contributor_name="SMITH, ALEX",
+                      transaction_tp="15", entity_tp="IND", amount=250),  # individual receipt
+        _donation_row(politician_id, source_id, fec_sub_id="4020260006",
+                      contributor_cmte_id=None, contributor_name="SMITH, ALEX",
+                      transaction_tp="22Y", entity_tp="IND", amount=100),  # refund: NOT a receipt
     ]
     db.upsert_donations_bulk(conn, rows)
     db.refresh_finance_views(conn)
 
     finance = conn.execute(
-        "SELECT pac_itemized, ie_support, ie_oppose FROM mv_candidacy_finance "
-        "WHERE fec_candidate_id = 'S6ME00001'"
+        "SELECT pac_itemized, ie_support, ie_oppose, individual_itemized_loaded, "
+        "individual_refunds FROM mv_candidacy_finance WHERE fec_candidate_id = 'S6ME00001'"
     ).fetchone()
     assert finance is not None
     assert int(finance[0]) == 5000   # memo row's 1000 NOT included
     assert int(finance[1]) == 20000
     assert int(finance[2]) == 30000
+    assert int(finance[3]) == 250    # refund's 100 NOT summed as a receipt
+    assert int(finance[4]) == 100    # ...but visible in its own column
 
     top = conn.execute(
         "SELECT committee_name, total_amount, donor_rank FROM mv_top_committee_donors"
