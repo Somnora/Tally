@@ -313,9 +313,15 @@ def state_candidacies(conn: Connection, state: str, cycle: int) -> list[Candidac
     ]
 
 
-def state_committee_ids(conn: Connection, state: str, cycle: int) -> set[str]:
-    """Committees attached to a state's candidates (indiv-file filter set)."""
-    cur = conn.execute(load_sql("select_state_committee_ids"), {"state": state, "cycle": cycle})
+def state_committee_map(conn: Connection, state: str, cycle: int) -> dict[str, str]:
+    """cmte_id -> fec_candidate_id for a state's candidates (indiv-file filter)."""
+    cur = conn.execute(load_sql("select_state_committee_map"), {"state": state, "cycle": cycle})
+    return {str(r[0]): str(r[1]) for r in cur.fetchall()}
+
+
+def all_committee_ids(conn: Connection) -> set[str]:
+    """Every known cmte_id (guards FK references while loading itemized rows)."""
+    cur = conn.execute(load_sql("select_all_committee_ids"))
     return {str(r[0]) for r in cur.fetchall()}
 
 
