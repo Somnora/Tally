@@ -564,7 +564,7 @@ def delete_promises_for_document(conn: Connection, document_id: int) -> None:
 class ReviewItem:
     promise_id: int
     politician_name: str
-    doc_title: str
+    doc_title: str | None
     doc_type: str
     url: str
     verbatim_quote: str

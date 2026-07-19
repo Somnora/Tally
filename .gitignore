@@ -14,3 +14,6 @@ __pycache__/
 
 # Downloaded data (FEC bulk archives, legislators YAML, etc.)
 data/raw/
+
+# Review exchange files (promise exports / triage verdicts) — working files, not source
+data/review/

@@ -1,0 +1,380 @@
+ ▐▛███▜▌   Claude Code v2.1.212
+▝▜█████▛▘  Fable 5 · Claude Pro
+  ▘▘ ▝▝    ~/Desktop/Tally
+
+ ▎ Extended through July 19
+ ▎ We're extending Claude Fable 5 access on all paid plans, as well as keeping Claude Code’s weekly rate limits 50% higher, through July 19.
+ ▎
+ ▎ As before, you can use up to half of your weekly usage limit on Fable 5. After that, you can keep using Fable 5 with usage credits, or switch to another model to keep working within your remaining limits.
+ ▎
+ ▎ More details here: https://support.claude.com/en/articles/15424964-claude-fable-5-promotional-access
+
+⏺ v2 run complete — the review found real bugs, and the numbers prove the fixes
+
+  The double-check paid for itself before the GPU even spun up. Reviewing my own
+  v2 draft found: a genuine contradiction (the three-part test excluded the
+  very statements the rhetorical category was supposed to classify), a missing
+  leak class (present-progressive "we're trying to..."), no quote-span limit,
+  and a third-person ambiguity that would have skipped campaign-platform text.
+  The run then exposed a fifth, sneakier bug: the coordinator's "who needs
+  extraction" query only checked extracted_at IS NULL, so a prompt-version bump
+  re-extracted nothing — first v2 attempt processed zero candidates. Fixed by
+  giving both layers the identical predicate.
+
+  Two workflow upgrades that changed the economics:
+  - Rejections are now data, not log lines. v1's 24 reject texts were lost to my
+  own grep filters; there's now an extraction_rejects table tagged by
+  prompt/model, which is how future prompt iterations get measured instead of
+  eyeballed.
+  - The gate grew a third rung — and the hypothesis it encoded was confirmed. 14
+  quotes this run matched the document exactly except for
+  whitespace/typographic differences (curly quotes, collapsed newlines) — under
+  v1 those were false rejections. The rung folds those for matching only, and
+  extraction now always stores the document's own span, so the
+  displayed-verbatim invariant holds by construction on every path. Plus
+  scripts/gpu_serve.sh: fresh box → serving in two commands, ~12 minutes.
+
+  v2 vs v1, head to head:
+
+  ┌────────────────────┬─────────────┬─────────────────────────────────────┐
+  │       metric       │     v1      │                 v2                  │
+  ├────────────────────┼─────────────┼─────────────────────────────────────┤
+  │ promises stored    │ 152         │ 122                                 │
+  ├────────────────────┼─────────────┼─────────────────────────────────────┤
+  │ gate rejections    │ 24          │ 3                                   │
+  ├────────────────────┼─────────────┼─────────────────────────────────────┤
+  │ whitespace         │ 0           │ 14                                  │
+  │ recoveries         │ (rejected)  │                                     │
+  ├────────────────────┼─────────────┼─────────────────────────────────────┤
+  │ v1 leak classes    │ yes         │ 0 hits on all seven probe patterns  │
+  │ present            │             │                                     │
+  ├────────────────────┼─────────────┼─────────────────────────────────────┤
+  │ offset mismatches  │ 0           │ 0                                   │
+  ├────────────────────┼─────────────┼─────────────────────────────────────┤
+  │ Pingree (the noisy │ 84          │ 36 — the town-hall over-extraction  │
+  │  one)              │             │ cleaned up                          │
+  └────────────────────┴─────────────┴─────────────────────────────────────┘
+
+  The 3 remaining rejects are all righteous kills — one is literally an activist
+  demanding things of Pingree, the exact test-C case. Sample quality is visibly
+  better (LePage's budworm pledge — "one of the things I want to do when I'm a
+  congressman" — is textbook measurable). Residual defect, honestly stated:
+  opinion-statements ("I think that's exactly the way it should be") still
+  sometimes pass as directional promises. Rather than a third blind prompt pass,
+  that should be quantified by Milestone 5's human-review CLI — precision
+  numbers first, then surgery.
+
+  A100 terminated (~$0.70 this session), everything committed and pushed to main
+  (09f6315). Ready for Milestone 5: evaluation + evidence validation + the 
+  human-review CLI whenever you are.
+
+✻ Worked for 32m 14s
+
+❯ /compact                                                                      
+  ⎿  Compacted (ctrl+o to see full summary)
+  ⎿  Read ../../.claude/projects/-Users-jamesmcshane-Desktop-Tally/memory/tally-
+     project-status.md (11 lines)
+  ⎿  Referenced file pipeline/workflows.py
+  ⎿  Referenced file pipeline/db.py
+  ⎿  Read db/sql/select_politicians_needing_extraction.sql (8 lines)
+  ⎿  Read tests/test_extract_promises.py (213 lines)
+
+❯ /effort                                                                       
+  ⎿  Set effort level to low (saved as your default for new sessions): Quick,
+     straightforward implementation with minimal overhead
+
+❯ what is the next phase. the new version of manifold has been updated          
+  ⎿  1 skill available
+
+⏺ The next phase is Milestone 5: evaluation and evidence validation — the last
+  big pipeline milestone before we start exporting to the app. In plain English,
+  this is where we stop just collecting promises and start checking them
+  against reality.
+
+  Here's what it involves, broken into the usual phases:
+
+  Phase A — Human-review CLI (first, on purpose). A small terminal tool that
+  shows you each stored promise with its quote and context, and lets you mark
+  it: real promise / opinion / fragment / wrong topic. We run it over the 122 v2
+  promises to get an actual precision number. This tells us whether the
+  "opinion statements sneaking in" problem is 2% or 20% before we spend any GPU
+  money on evaluation.
+
+  Phase B — Evaluation stage. For each scoreable promise of an incumbent, the
+  LLM gets the verified promise plus a pre-aggregated donor summary and a
+  filtered vote list (each item carrying its database id), and returns a
+  judgment like "kept / broken / mixed / no evidence" with the specific vote and
+  donation ids it relied on.
+
+  Phase C — Evidence validation (the trust gate). Code checks every cited id:
+  the record must exist AND actually support the stated direction. Any
+  evaluation with an invalid citation never ships — same philosophy as the quote
+  gate in M4.
+
+  Phase D — GPU run + inspection. Spin up the A100 with the proven gpu_serve.sh
+  recipe, evaluate Collins and Pingree (our two incumbents with vote records),
+  and review the results together.
+
+  One note: only Collins and Pingree have voting records (Russell, Dunlap, and
+  LePage are challengers), and Collins only has 2 stored promises from the pilot
+  documents, so the evaluation sample will be small — that's fine for proving
+  the pipeline before scaling.
+
+  The Manifold update doesn't change anything until Phase D, but good to know
+  it's ready.
+
+  Want me to start with Phase A, the review CLI?
+
+✻ Baked for 12s
+
+❯ start with phase A                                                            
+
+  Ran 4 shell commands (ctrl+o to expand)
+
+⏺ Write(db/migrations/0009_promise_reviews.sql)
+  ⎿  Wrote 26 lines to db/migrations/0009_promise_reviews.sql
+       1 -- 0009: human review verdicts on extracted promises.
+       3 -- Purpose: quantify extraction precision per prompt_version bef
+         ore writing
+         nfirmed
+       5 -- promises where a reviewer has weighed in. One verdict per pro
+       6 -- re-reviewing overwrites (the CLI is the only writer). The ver
+         dict a
+         opic, and
+       8 -- specificity together).
+      10 CREATE TABLE promise_reviews (
+     … +30 lines (ctrl+o to expand)
+
+⏺ Write(db/sql/promise_review_upsert.sql)
+  ⎿  Wrote 10 lines to db/sql/promise_review_upsert.sql
+       1 INSERT INTO promise_reviews
+       2     (promise_id, verdict, note, prompt_version, model_name)
+       3 VALUES
+       4     (%(promise_id)s, %(verdict)s, %(note)s, %(prompt_version)s, 
+         %(model_name)s)
+       6     verdict        = EXCLUDED.verdict,
+       7     note           = EXCLUDED.note,
+       8     prompt_version = EXCLUDED.prompt_version,
+       9     model_name     = EXCLUDED.model_name,
+      10     reviewed_at    = now()
+     … +1 line (ctrl+o to expand)
+
+⏺ Write(db/sql/select_promises_for_review.sql)
+  ⎿  Wrote 23 lines to db/sql/select_promises_for_review.sql
+       1 -- Promises awaiting a human verdict, with enough document conte
+         xt for the
+         tician then
+       3 -- document so the reviewer keeps one speaker's voice in their h
+         ead at a time.
+       5     p.promise_id,
+       6     pol.full_name,
+       7     d.title,
+       9     d.url,
+      10     p.verbatim_quote,
+     … +19 lines (ctrl+o to expand)
+
+⏺ Write(db/sql/report_review_summary.sql)
+  ⎿  Wrote 9 lines to db/sql/report_review_summary.sql
+      1 -- Precision report: verdict counts per prompt_version, plus over
+        all
+      2 -- precision (correct + label-only errors still count as real pro
+        mises).
+      3 SELECT
+      5     verdict,
+      6     count(*) AS n
+      7 FROM promise_reviews
+      8 GROUP BY prompt_version, verdict
+      9 ORDER BY prompt_version, n DESC
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(pipeline/db.py)
+  ⎿  Added 59 lines
+      560      conn.execute(load_sql("promises_delete_for_document"), {"d
+           ocument_id": document_id})
+      561  
+      562  
+      563 +@dataclass(frozen=True)                                       
+      564 +class ReviewItem:                                             
+      565 +    promise_id: int                                           
+      566 +    politician_name: str                                      
+      567 +    doc_title: str                                            
+      568 +    doc_type: str                                             
+      569 +    url: str                                                  
+      570 +    verbatim_quote: str                                       
+      571 +    topic: str                                                
+      572 +    specificity: str                                          
+      573 +    is_scoreable: bool                                        
+      574 +    context_before: str                                       
+      575 +    context_after: str                                        
+      576 +                                                              
+      577 +                                                              
+      578 +def promises_for_review(conn: Connection, context_chars: int =
+          + 300) -> list[ReviewItem]:                                    
+      579 +    """Promises with no human verdict yet, with surrounding do
+          +cument context."""                                            
+      580 +    cur = conn.execute(                                       
+      581 +        load_sql("select_promises_for_review"), {"context_char
+          +s": context_chars}                                            
+      582 +    )                                                         
+      583 +    return [                                                  
+      584 +        ReviewItem(                                           
+      585 +            promise_id=int(r[0]), politician_name=r[1], doc_ti
+          +tle=r[2],                                                     
+      586 +            doc_type=r[3], url=r[4], verbatim_quote=r[5], topi
+          +c=r[8],                                                       
+      587 +            specificity=r[9], is_scoreable=r[10],             
+      588 +            context_before=r[11] or "", context_after=r[12] or
+          + "",                                                          
+      589 +        )                                                     
+      590 +        for r in cur.fetchall()                               
+      591 +    ]                                                         
+      592 +                                                              
+      593 +                                                              
+      594 +def upsert_promise_review(                                    
+      595 +    conn: Connection,                                         
+      596 +    *,                                                        
+      597 +    promise_id: int,                                          
+      598 +    verdict: str,                                             
+      599 +    note: str | None,                                         
+      600 +    prompt_version: str,                                      
+      601 +    model_name: str,                                          
+      602 +) -> None:                                                    
+      603 +    """Record (or overwrite) the human verdict on one promise.
+          +"""                                                           
+      604 +    conn.execute(                                             
+      605 +        load_sql("promise_review_upsert"),                    
+      606 +        {                                                     
+      607 +            "promise_id": promise_id,                         
+      608 +            "verdict": verdict,                               
+      609 +            "note": note,                                     
+      610 +            "prompt_version": prompt_version,                 
+      611 +            "model_name": model_name,                         
+      612 +        },                                                    
+      613 +    )                                                         
+      614 +                                                              
+      615 +                                                              
+      616 +def review_summary(conn: Connection) -> list[tuple[str, str, i
+          +nt]]:                                                         
+      617 +    """(prompt_version, verdict, count) rows for the precision
+          + report."""                                                   
+      618 +    cur = conn.execute(load_sql("report_review_summary"))     
+      619 +    return [(r[0], r[1], int(r[2])) for r in cur.fetchall()]  
+      620 +                                                              
+      621 +                                                              
+      622  def mark_document_extracted(
+      623      conn: Connection, document_id: int, model_name: str, promp
+           t_version: str
+      624  ) -> None:
+
+⏺ Update(db/sql/select_promises_for_review.sql)
+  ⎿  Added 2 lines
+      13      p.topic,
+      14      p.specificity,
+      15      p.is_scoreable,
+      16 +    p.prompt_version,                                          
+      17 +    p.model_name,                                              
+      18      substring(d.full_text FROM greatest(1, p.char_start - %(con
+          text_chars)s + 1)
+      19                            FOR least(p.char_start, %(context_cha
+          rs)s)) AS context_before,
+      20      substring(d.full_text FROM p.char_end + 1 FOR %(context_cha
+          rs)s) AS context_after
+⏺ Update(pipeline/db.py)
+  ⎿  Added 2 lines
+      571      topic: str
+      572      specificity: str
+      573      is_scoreable: bool
+      574 +    prompt_version: str                                       
+      575 +    model_name: str                                           
+      576      context_before: str
+      577      context_after: str
+      578  
+
+⏺ Update(pipeline/db.py)
+  ⎿  Added 2 lines, removed 1 line
+      587              promise_id=int(r[0]), politician_name=r[1], doc_ti
+           tle=r[2],
+      588              doc_type=r[3], url=r[4], verbatim_quote=r[5], topi
+           c=r[8],
+      589              specificity=r[9], is_scoreable=r[10],
+      590 -            context_before=r[11] or "", context_after=r[12] or
+          - "",                                                          
+      590 +            prompt_version=r[11], model_name=r[12],           
+      591 +            context_before=r[13] or "", context_after=r[14] or
+          + "",                                                          
+      592          )
+      593          for r in cur.fetchall()
+      594      ]
+
+⏺ Write(pipeline/review_cli.py)
+  ⎿  Wrote 123 lines to pipeline/review_cli.py
+       1 """Human-review CLI for extracted promises.
+       3 Shows each unreviewed promise with surrounding document context 
+         and records
+         on before
+       5 any prompt v3 work, and a human-confirmed set for the evaluation
+       6 
+       7 Run:  uv run python -m pipeline.review_cli          # review que
+       8       uv run python -m pipeline.review_cli --report # verdict su
+         mmary
+      10 Keys: y correct / o opinion / f fragment / n not a promise
+     … +133 lines (ctrl+o to expand)
+
+⏺ Now tests, then run migration + checks:
+
+⏺ Write(tests/test_review.py)
+  ⎿  Wrote 53 lines to tests/test_review.py
+       1 """Promise-review plumbing: queue selection, verdict upsert, sum
+         mary."""
+       2 
+       4 from tests.test_extract_promises import DOCUMENT_TEXT, _make_doc
+         ument
+       5 from tests.test_finance_schema import _seed_candidate
+       6 
+       8 def _seed_promise(conn: db.Connection) -> int:
+       9     politician_id, source_id = _seed_candidate(conn)
+      10     doc_id = _make_document(conn, politician_id, source_id)
+     … +52 lines (ctrl+o to expand)
+
+  Ran 5 shell commands (ctrl+o to expand)
+
+⏺ Phase A is done: 53 tests passing (2 new), ruff and pyright clean, committed
+  as 1aeb6ca and pushed on the new feature/milestone-5-evaluation branch.
+
+  What got built, in plain English:
+
+  - A verdict table (promise_reviews, migration 0009). One row per promise,
+  storing your judgment. Re-reviewing a promise overwrites the old verdict
+  rather than piling up duplicates. Each verdict is tagged with the prompt
+  version and model that produced the promise, so we can compare v2's precision
+  against any future v3 directly.
+  - The review tool. Run uv run python -m pipeline.review_cli and it walks you
+  through all 122 promises, one at a time. For each one you see: who said it,
+  the document title and link, the extracted quote highlighted between >>> <<<
+  markers, and about 300 characters of surrounding transcript on each side so
+  you can judge without opening YouTube. Then one keypress:
+    - y correct (real promise, labeled right)
+    - o opinion (a stance, not a commitment — the leak class we suspect)
+    - f fragment (too thin to mean anything)
+    - n not a promise (some other miss)
+    - s real promise but wrong specificity tier, t real promise but wrong topic
+    - k skip for now, q quit
+
+  Every verdict saves immediately, so you can quit mid-session and pick up where
+  you left off — the queue only shows unreviewed promises.
+  - The precision report. uv run python -m pipeline.review_cli --report totals
+  the verdicts and computes precision, counting s and t as real promises (the
+  promise is genuine, only the label is off).
+
+  One judgment call to note: I made the verdicts single-choice rather than
+  letting you flag both "wrong topic AND wrong specificity" on one promise. With
+  122 items, speed of review beats completeness of labeling — use the note
+  field if a promise has two problems.
+
+  Your move: run the CLI over the 122 promises (probably 20-30 minutes), then
+  run --report and share the numbers. That precision figure decides whether we
+  need a prompt v3 before the evaluation stage, or can proceed straight to Phase
+  B.
+
+✻ Churned for 2m 44s
