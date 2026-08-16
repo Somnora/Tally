@@ -15,16 +15,24 @@ MODEL="${TALLY_MODEL:-Qwen/Qwen3.5-27B-FP8}"
 NFS=/lambda/nfs/Somnora-East
 VENV="$HOME/tally-venv"
 MIN_DRIVER=580   # CUDA 13 wheels need >= 580; Lambda images ship 570 (12.8)
-# Lambda's image defaults to python3.10. vllm hard-depends on flashinfer,
-# whose fd_exchange.py annotates array.array[int] at import time, which only
-# parses on 3.11+. On 3.10 the engine dies with "'type' object is not
-# subscriptable", and removing flashinfer just moves the failure to an
-# unguarded import elsewhere. So the venv is built on 3.12 explicitly.
+# Lambda's image defaults to python3.10, and two things need 3.12 here.
+# vllm hard-depends on flashinfer, whose fd_exchange.py annotates
+# array.array[int] at import time, which only parses on 3.11+; on 3.10 the
+# engine dies with "'type' object is not subscriptable", and removing
+# flashinfer just moves the failure to an unguarded import elsewhere.
+# python3.12-dev matters just as much: triton compiles cuda_utils.c at first
+# use and needs Python.h, and without it the engine dies during profiling
+# with a bare CalledProcessError from gcc.
 PYTHON=python3.12
 
 driver_major() {
     nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d. -f1
 }
+
+# Reassert cache ownership before ANY pip or vllm run: the sudo apt calls
+# below create ~/.cache as root, and both pip (silently, losing its cache)
+# and vllm (fatally, EACCES on ~/.cache/flashinfer) trip over it afterwards.
+sudo chown -R "$(id -un):$(id -gn)" "$HOME/.cache" 2>/dev/null || true
 
 if [ ! -d "$VENV" ] || [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
     echo "== stage SETUP =="
@@ -32,7 +40,7 @@ if [ ! -d "$VENV" ] || [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
         if ! command -v "$PYTHON" >/dev/null 2>&1; then
             sudo apt-get update -qq >/dev/null
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-                python3.12 python3.12-venv >/dev/null 2>&1
+                python3.12 python3.12-venv python3.12-dev >/dev/null 2>&1
         fi
         # Fully isolated venv: system dist-packages carry a broken flatbuffers.
         "$PYTHON" -m venv "$VENV"
