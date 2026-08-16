@@ -120,15 +120,22 @@ def main() -> None:
     parser.add_argument("--prompt-version", default="extract_v3")
     parser.add_argument("--limit-documents", type=int,
                         help="stop after N documents (smoke test)")
+    parser.add_argument("--gate", action="store_true",
+                        help="also pass each span through pipeline.promise_gate")
+    parser.add_argument("--save-spans", type=Path, metavar="FILE",
+                        help="cache the extracted spans as JSON so gate "
+                             "experiments can be rerun without paying for GPU again")
+    parser.add_argument("--load-spans", type=Path, metavar="FILE",
+                        help="score a cached span file instead of calling a model")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     settings = get_settings()
-    if not settings.vllm_base_url or not settings.local_model:
-        parser.error("set VLLM_BASE_URL and LOCAL_MODEL in .env (start a GPU first)")
-
-    # Fail fast if the prompt does not exist, before any model time is spent.
-    load_prompt(args.prompt_version)
+    if not args.load_spans:
+        if not settings.vllm_base_url or not settings.local_model:
+            parser.error("set VLLM_BASE_URL and LOCAL_MODEL in .env (start a GPU first)")
+        # Fail fast if the prompt is missing, before any model time is spent.
+        load_prompt(args.prompt_version)
 
     with db.connect() as conn:
         gold = gold_spans(conn)
@@ -146,21 +153,51 @@ def main() -> None:
             for r in rows
         ]
 
-    import pipeline.stages.extract_promises as stage
-    original = stage.PROMPT_VERSION
-    stage.PROMPT_VERSION = args.prompt_version
-    try:
-        agent = build_agent()
-    finally:
-        stage.PROMPT_VERSION = original
+    by_id = {d.document_id: d for d in documents}
+    if args.load_spans:
+        cached: list[dict[str, int]] = json.loads(
+            args.load_spans.read_text(encoding="utf-8")
+        )
+        found: list[Span] = [
+            Span(int(s["document_id"]), int(s["char_start"]), int(s["char_end"]))
+            for s in cached
+        ]
+        print(f"Scoring {len(found)} cached spans from {args.load_spans}. "
+              "No model was called.\n")
+    else:
+        import pipeline.stages.extract_promises as stage
+        original = stage.PROMPT_VERSION
+        stage.PROMPT_VERSION = args.prompt_version
+        try:
+            agent = build_agent()
+        finally:
+            stage.PROMPT_VERSION = original
 
-    print(f"Scoring {args.prompt_version} over {len(documents)} documents "
-          f"against {len(gold)} labelled promises. Nothing is written.\n")
+        print(f"Scoring {args.prompt_version} over {len(documents)} documents "
+              f"against {len(gold)} labelled promises. Nothing is written.\n")
 
-    found: list[Span] = []
-    for index, document in enumerate(documents, start=1):
-        found.extend(extract_spans(agent, document))
-        print(f"  {index}/{len(documents)} documents, {len(found)} verified spans so far")
+        found = []
+        for index, document in enumerate(documents, start=1):
+            found.extend(extract_spans(agent, document))
+            print(f"  {index}/{len(documents)} documents, {len(found)} verified spans")
+
+    if args.save_spans:
+        args.save_spans.parent.mkdir(parents=True, exist_ok=True)
+        args.save_spans.write_text(json.dumps(
+            [{"document_id": s.document_id, "char_start": s.char_start,
+              "char_end": s.char_end} for s in found]), encoding="utf-8")
+        print(f"  cached {len(found)} spans to {args.save_spans}")
+
+    if args.gate:
+        # The gate is a pure function of the quote text, so it can be layered
+        # on any prompt's output. This is the combination question: does a
+        # better prompt still need the gate, and vice versa.
+        from pipeline.promise_gate import screen_promise
+        before = len(found)
+        found = [s for s in found
+                 if screen_promise(
+                     by_id[s.document_id].full_text[s.char_start:s.char_end]).keep]
+        print(f"  gate dropped {before - len(found)} of {before} spans\n")
 
     matched: set[int] = set()
     for promise_id, (span, _, _) in gold.items():
