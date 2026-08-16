@@ -853,6 +853,62 @@ def insert_evaluation_evidence(
     )
 
 
+@dataclass(frozen=True)
+class StoredCitation:
+    """One persisted citation, as revalidation sees it."""
+
+    evidence_id: int
+    evaluation_id: int
+    kind: str
+    vote_id: int | None
+    direction: str
+    validated: bool
+    politician_id: int
+    status: str
+    is_current: bool
+
+
+def evidence_for_revalidation(conn: Connection) -> list[StoredCitation]:
+    rows = conn.execute(load_sql("select_evidence_for_revalidation")).fetchall()
+    return [
+        StoredCitation(
+            evidence_id=int(r[0]), evaluation_id=int(r[1]), kind=str(r[2]),
+            vote_id=None if r[3] is None else int(r[3]), direction=str(r[4]),
+            validated=bool(r[5]), politician_id=int(r[6]), status=str(r[7]),
+            is_current=bool(r[8]),
+        )
+        for r in rows
+    ]
+
+
+def set_evidence_validated(conn: Connection, evidence_id: int, validated: bool) -> None:
+    conn.execute(
+        load_sql("evaluation_evidence_set_validated"),
+        {"evidence_id": evidence_id, "validated": validated},
+    )
+
+
+def set_evaluation_current(conn: Connection, evaluation_id: int, is_current: bool) -> None:
+    conn.execute(
+        load_sql("evaluation_set_current"),
+        {"evaluation_id": evaluation_id, "is_current": is_current},
+    )
+
+
+def evaluation_summary(conn: Connection) -> list[tuple[str, str, str, int, int, int]]:
+    return [
+        (str(r[0]), str(r[1]), str(r[2]), int(r[3]), int(r[4]), int(r[5]))
+        for r in conn.execute(load_sql("report_evaluation_summary")).fetchall()
+    ]
+
+
+def citation_reject_summary(conn: Connection) -> list[tuple[str, int, int]]:
+    return [
+        (str(r[0]), int(r[1]), int(r[2]))
+        for r in conn.execute(load_sql("report_citation_rejects")).fetchall()
+    ]
+
+
 def insert_citation_reject(
     conn: Connection,
     *,

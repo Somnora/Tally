@@ -81,6 +81,41 @@ def test_donation_may_never_carry_a_verdict() -> None:
     )
 
 
+def test_vote_outside_the_offered_list_is_refused() -> None:
+    # Real vote, right member, but never shown to the model. Without this the
+    # prompt's "cite only ids from the list below" is advice, not a rule.
+    facts = {1: _fact(1), 2: _fact(2)}
+    result = check_citation(
+        ClaimedEvidence("vote", 2, "supports"),
+        politician_id=PINGREE, vote_facts=facts, offered_vote_ids=frozenset({1}),
+    )
+    assert not result.accepted
+    assert result.reason == "not_offered"
+
+
+def test_offered_check_is_skipped_when_the_set_is_unknown() -> None:
+    # Revalidation cannot re-derive what was offered, so passing None must
+    # skip the check rather than reject everything.
+    result = check_citation(
+        ClaimedEvidence("vote", 2, "supports"),
+        politician_id=PINGREE, vote_facts={2: _fact(2)}, offered_vote_ids=None,
+    )
+    assert result.accepted
+
+
+def test_misread_position_is_refused() -> None:
+    facts = {1: _fact(1)}  # stored position is nay
+    claim = ClaimedEvidence("vote", 1, "supports", claimed_position="yea")
+    result = check_citation(claim, politician_id=PINGREE, vote_facts=facts)
+    assert not result.accepted
+    assert result.reason == "position_mismatch"
+
+
+def test_correctly_read_position_passes() -> None:
+    claim = ClaimedEvidence("vote", 1, "contradicts", claimed_position="nay")
+    assert check_citation(claim, politician_id=PINGREE, vote_facts={1: _fact(1)}).accepted
+
+
 def test_garbage_direction_is_rejected() -> None:
     assert _check(ClaimedEvidence("vote", 1, "proves"), {1: _fact(1)}).reason == (
         "bad_direction"

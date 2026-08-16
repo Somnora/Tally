@@ -126,7 +126,8 @@ def test_valid_citation_is_stored_current_and_exportable(conn: db.Connection) ->
     stats = _run(conn, politician_id, {
         "status": "broken", "consistency_score": 20,
         "llm_reasoning": "Voted against HR 1181 on passage.",
-        "evidence": [{"kind": "vote", "id": vote_id, "direction": "contradicts"}],
+        "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
+                      "direction": "contradicts"}],
     })
     assert stats["evaluations_validated"] == 1
     assert _stored(conn, promise_id) == ("broken", 20, True)
@@ -140,7 +141,8 @@ def test_invented_vote_id_never_exports(conn: db.Connection) -> None:
     stats = _run(conn, politician_id, {
         "status": "broken", "consistency_score": 15,
         "llm_reasoning": "Voted against a bill that does not exist.",
-        "evidence": [{"kind": "vote", "id": 987654321, "direction": "contradicts"}],
+        "evidence": [{"kind": "vote", "id": 987654321, "position": "nay",
+                      "direction": "contradicts"}],
     })
     assert stats["citation_unknown_record"] == 1
     assert stats["evaluations_failed_validation"] == 1
@@ -155,6 +157,45 @@ def test_invented_vote_id_never_exports(conn: db.Connection) -> None:
         "SELECT cited_record_id, reason FROM evaluation_citation_rejects"
     )
     assert cur.fetchall() == [(987654321, "unknown_record")]
+
+
+def test_real_vote_that_was_never_offered_is_refused(conn: db.Connection) -> None:
+    politician_id, promise_id = _seed(conn)
+    # Roll call 239 is a genuine vote by this member, but the pre-filter
+    # offers only the substantive one, so the model was never shown it.
+    cur = conn.execute(
+        "SELECT vote_id FROM voting_records WHERE politician_id = %s "
+        "AND roll_call_number = 239", (politician_id,)
+    )
+    row = cur.fetchone()
+    assert row is not None
+    unoffered = int(row[0])
+
+    stats = _run(conn, politician_id, {
+        "status": "broken", "consistency_score": 25,
+        "llm_reasoning": "Cited a vote that exists but was not supplied.",
+        "evidence": [{"kind": "vote", "id": unoffered, "position": "yea",
+                      "direction": "contradicts"}],
+    })
+    assert stats["citation_not_offered"] == 1
+    assert _exported(conn, promise_id) == 0, (
+        "a vote outside the supplied list is inadmissible even though it is real"
+    )
+
+
+def test_misread_position_is_refused(conn: db.Connection) -> None:
+    politician_id, promise_id = _seed(conn)
+    vote_id = _substantive_vote_id(conn, politician_id)
+    # The record says nay. A model claiming yea has misread the row, so its
+    # direction cannot be trusted even if it happens to land correctly.
+    stats = _run(conn, politician_id, {
+        "status": "completed", "consistency_score": 90,
+        "llm_reasoning": "Claimed a yea on a vote the record shows as nay.",
+        "evidence": [{"kind": "vote", "id": vote_id, "position": "yea",
+                      "direction": "supports"}],
+    })
+    assert stats["citation_position_mismatch"] == 1
+    assert _exported(conn, promise_id) == 0
 
 
 def test_verdict_with_no_citations_never_exports(conn: db.Connection) -> None:
@@ -199,7 +240,8 @@ def test_re_evaluation_supersedes_without_destroying_history(conn: db.Connection
     good = {
         "status": "broken", "consistency_score": 20,
         "llm_reasoning": "First evaluation.",
-        "evidence": [{"kind": "vote", "id": vote_id, "direction": "contradicts"}],
+        "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
+                      "direction": "contradicts"}],
     }
     _run(conn, politician_id, good)
     # A promise already evaluated by this model and prompt is not redone.

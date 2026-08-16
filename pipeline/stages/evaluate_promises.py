@@ -54,6 +54,9 @@ Status = Literal["completed", "in_progress", "broken", "pending", "unverifiable"
 class EvidenceItem(BaseModel):
     kind: Literal["vote"] = "vote"
     id: int = Field(description="A vote_id copied from the supplied list.")
+    position: Literal["yea", "nay"] = Field(
+        description="The position shown for that vote_id, copied exactly."
+    )
     direction: Literal["supports", "contradicts", "contextual"]
 
 
@@ -151,12 +154,17 @@ def evaluate_promise(
     stats["evaluated"] += 1
 
     claims = [
-        evidence.ClaimedEvidence(kind=item.kind, record_id=item.id, direction=item.direction)
+        evidence.ClaimedEvidence(
+            kind=item.kind, record_id=item.id, direction=item.direction,
+            claimed_position=item.position,
+        )
         for item in result.evidence
     ]
     facts = db.vote_facts(conn, [c.record_id for c in claims if c.kind == "vote"])
     checks = evidence.check_citations(
-        claims, politician_id=promise.politician_id, vote_facts=facts
+        claims, politician_id=promise.politician_id, vote_facts=facts,
+        # Only the votes this promise was actually shown are admissible.
+        offered_vote_ids=frozenset(v.vote_id for v in votes),
     )
     coherent, coherence_reason = evidence.status_is_supported(result.status, checks)
 

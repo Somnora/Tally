@@ -22,7 +22,16 @@ What a citation must survive:
      foreign key cannot catch a citation of someone else's vote. Only an
      ownership check can, and cross-member citation is exactly the mistake a
      model makes when a promise mentions an opponent.
-  3. The direction is one the record can carry:
+  3. It was actually offered. A real vote by the right member is still not
+     admissible if it was never in the prompt. The prompt says "cite only ids
+     from the list below"; without this check that sentence is advice, and
+     the model could reach into any of the member's several hundred other
+     votes on any topic and still look correct.
+  4. The model read it correctly. Each citation states the position it saw,
+     and that is compared against the stored position. A misread row yields a
+     confident sentence just like a correct one, so the only way to tell them
+     apart is to make the model commit to a checkable fact first.
+  5. The direction is one the record can carry:
        - an omnibus vote is contextual only. A yea on a 153-subject
          appropriations act is not clean support for any one promise in it.
        - a procedural vote is contextual only. Recommittal and previous
@@ -60,11 +69,19 @@ CONTEXTUAL_ONLY_KINDS = frozenset({"donation", "lobbying_filing"})
 
 @dataclass(frozen=True)
 class ClaimedEvidence:
-    """One citation exactly as the model returned it."""
+    """One citation exactly as the model returned it.
+
+    `claimed_position` is the position the model says it read ("yea"/"nay").
+    Requiring it is the same trick verify.py plays with verbatim quotes: make
+    the model commit to a fact that can be checked mechanically. A model that
+    misreads the vote list writes a confident sentence either way, and the
+    misreading is invisible in prose but obvious against the database.
+    """
 
     kind: str
     record_id: int
     direction: str
+    claimed_position: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +115,8 @@ STORABLE_REASONS = frozenset({
     "omnibus_not_contextual",
     "procedural_not_contextual",
     "wrong_politician",
+    "not_offered",
+    "position_mismatch",
 })
 
 
@@ -116,9 +135,15 @@ def check_citation(
     *,
     politician_id: int,
     vote_facts: dict[int, VoteFact],
+    offered_vote_ids: frozenset[int] | None = None,
 ) -> CitationCheck:
     """Test one citation against the facts. Never raises; every rejection
-    carries a reason so a bad prompt is diagnosable from the stats alone."""
+    carries a reason so a bad prompt is diagnosable from the stats alone.
+
+    offered_vote_ids is the set of votes actually shown to the model. Pass
+    None to skip that check, which is what revalidation does: the offered set
+    was never stored, so a later pass cannot re-derive it.
+    """
     if claim.direction not in ("supports", "contradicts", "contextual"):
         return CitationCheck(claim, False, "bad_direction")
 
@@ -137,6 +162,16 @@ def check_citation(
         return CitationCheck(claim, False, "unknown_record")
     if fact.politician_id != politician_id:
         return CitationCheck(claim, False, "wrong_politician")
+    if offered_vote_ids is not None and claim.record_id not in offered_vote_ids:
+        # A real vote by the right member that was never in the prompt. The
+        # prompt says "cite only ids from the list below", and without this
+        # the model could reach into any of the member's several hundred other
+        # votes, on any topic, and the citation would still look valid.
+        return CitationCheck(claim, False, "not_offered")
+    if claim.claimed_position is not None and claim.claimed_position != fact.position:
+        # The model read the row wrong. Its direction is then untrustworthy
+        # even if it happens to be right.
+        return CitationCheck(claim, False, "position_mismatch")
     if fact.is_omnibus and claim.direction != "contextual":
         return CitationCheck(claim, False, "omnibus_not_contextual")
     if fact.is_procedural and claim.direction != "contextual":
@@ -149,6 +184,7 @@ def check_citations(
     *,
     politician_id: int,
     vote_facts: dict[int, VoteFact],
+    offered_vote_ids: frozenset[int] | None = None,
 ) -> list[CitationCheck]:
     """Check every citation, dropping exact duplicates.
 
@@ -164,7 +200,10 @@ def check_citations(
             continue
         seen.add(key)
         checks.append(
-            check_citation(claim, politician_id=politician_id, vote_facts=vote_facts)
+            check_citation(
+                claim, politician_id=politician_id, vote_facts=vote_facts,
+                offered_vote_ids=offered_vote_ids,
+            )
         )
     return checks
 
