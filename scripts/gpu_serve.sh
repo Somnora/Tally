@@ -15,6 +15,12 @@ MODEL="${TALLY_MODEL:-Qwen/Qwen3.5-27B-FP8}"
 NFS=/lambda/nfs/Somnora-East
 VENV="$HOME/tally-venv"
 MIN_DRIVER=580   # CUDA 13 wheels need >= 580; Lambda images ship 570 (12.8)
+# Lambda's image defaults to python3.10. vllm hard-depends on flashinfer,
+# whose fd_exchange.py annotates array.array[int] at import time, which only
+# parses on 3.11+. On 3.10 the engine dies with "'type' object is not
+# subscriptable", and removing flashinfer just moves the failure to an
+# unguarded import elsewhere. So the venv is built on 3.12 explicitly.
+PYTHON=python3.12
 
 driver_major() {
     nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d. -f1
@@ -23,8 +29,13 @@ driver_major() {
 if [ ! -d "$VENV" ] || [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
     echo "== stage SETUP =="
     if [ ! -d "$VENV" ]; then
+        if ! command -v "$PYTHON" >/dev/null 2>&1; then
+            sudo apt-get update -qq >/dev/null
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+                python3.12 python3.12-venv >/dev/null 2>&1
+        fi
         # Fully isolated venv: system dist-packages carry a broken flatbuffers.
-        python3 -m venv "$VENV"
+        "$PYTHON" -m venv "$VENV"
         source "$VENV/bin/activate"
         pip install -q --upgrade pip
         pip install -q vllm
@@ -40,6 +51,9 @@ if [ ! -d "$VENV" ] || [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
 fi
 
 echo "== stage SERVE ($MODEL) =="
+# The sudo apt calls above create ~/.cache owned by root, and vllm then dies
+# with EACCES writing ~/.cache/flashinfer. Cheap to reassert every run.
+sudo chown -R "$(id -un):$(id -gn)" "$HOME/.cache" 2>/dev/null || true
 source "$VENV/bin/activate"
 export HF_HOME=$NFS/hf-cache HF_HUB_ENABLE_HF_TRANSFER=0 HF_HUB_DISABLE_XET=1
 mkdir -p "$HF_HOME"

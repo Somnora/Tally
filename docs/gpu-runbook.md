@@ -18,6 +18,26 @@ side needs only two env vars; everything here is server-side.
   system dist-packages carry a broken flatbuffers).
 - Downloads: `HF_HUB_ENABLE_HF_TRANSFER=0 HF_HUB_DISABLE_XET=1`.
 
+## Traps that appeared later (2026-08-16)
+
+Both cost a failed server start on a fresh box. `scripts/gpu_serve.sh` now
+handles each, but they are worth knowing when reading a crash log.
+
+- **Python 3.10 is too old.** Lambda's image defaults to `python3.10`, and
+  the original script built the venv with plain `python3`. Current vllm hard
+  depends on flashinfer, whose `comm/fd_exchange.py` annotates
+  `array.array[int]` at import time; that only parses on 3.11+. On 3.10 the
+  engine dies with `TypeError: 'type' object is not subscriptable`.
+  Uninstalling flashinfer does NOT help: the guarded import at
+  `allreduce_rms_fusion.py` is skipped via `find_spec`, but another import
+  is unguarded and turns it into `ModuleNotFoundError`. Build the venv with
+  `python3.12` (available as `3.12.13-1+jammy1`, needs `python3.12-venv`).
+- **`~/.cache` ends up root-owned.** The `sudo apt-get install` of the driver
+  creates `/home/ubuntu/.cache` as root, after which vllm fails with
+  `PermissionError: [Errno 13] Permission denied: '/home/ubuntu/.cache/flashinfer'`.
+  The same cause makes pip print "cache has been disabled" warnings during
+  setup, which is the early tell. `chown -R` before serving.
+
 ## Serve command
 
 ```sh
