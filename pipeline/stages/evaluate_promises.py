@@ -260,5 +260,16 @@ def evaluate_promises(
     )
     stats["eligible"] = len(promises)
     for promise in promises:
-        evaluate_promise(conn, agent, promise, model_name, stats)
+        try:
+            evaluate_promise(conn, agent, promise, model_name, stats)
+        except Exception:
+            # One promise the model cannot answer in schema must not abandon
+            # the other twenty one. Same rule as one workflow per candidate:
+            # a single failure is logged and counted, never fatal. The promise
+            # stays unevaluated and is retried on the next run.
+            stats["model_failures"] += 1
+            logger.exception(
+                "promise %d (%s) failed; continuing",
+                promise.promise_id, promise.topic,
+            )
     return stats
