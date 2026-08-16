@@ -708,6 +708,42 @@ def mark_document_extracted(
     )
 
 
+def promises_for_gate(
+    conn: Connection, *, gate_version: str, only_unscreened: bool = True
+) -> list[tuple[int, str]]:
+    """(promise_id, verbatim_quote) awaiting the selectivity screen."""
+    rows = conn.execute(
+        load_sql("select_promises_for_gate"),
+        {"gate_version": gate_version, "only_unscreened": only_unscreened},
+    ).fetchall()
+    return [(int(r[0]), str(r[1])) for r in rows]
+
+
+def set_gate_verdict(
+    conn: Connection, *, promise_id: int, keep: bool, reason: str, gate_version: str
+) -> None:
+    """Store the gate's opinion. The promise itself is never modified."""
+    conn.execute(
+        load_sql("promise_set_gate_verdict"),
+        {"promise_id": promise_id, "gate_keep": keep, "gate_reason": reason,
+         "gate_version": gate_version},
+    )
+
+
+def unscreened_exportable_promises(conn: Connection) -> int:
+    """Exportable promises the current gate has never seen.
+
+    The export job refuses to build while this is non-zero: shipping a
+    promise nobody screened is the exact failure the gate exists to prevent.
+    """
+    cur = conn.execute(
+        "SELECT count(*) FROM app_export_promises e "
+        "JOIN promises p USING (promise_id) WHERE p.gate_keep IS NULL"
+    )
+    row = cur.fetchone()
+    return 0 if row is None else int(row[0])
+
+
 # -- evaluation (Milestone 5) --------------------------------------------------
 
 @dataclass(frozen=True)

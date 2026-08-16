@@ -20,3 +20,6 @@ data/review/
 
 # Exported assistant session transcripts: working artifacts, never source.
 /20??-??-??-*.txt
+
+# Built snapshots: regenerated from Postgres, never source.
+dist/
