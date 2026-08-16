@@ -1,13 +1,13 @@
 """Build the district page from the published snapshot.
 
 The page is a single self-contained HTML file: stylesheet, script and data all
-inlined. That is a deliberate choice for this stage rather than a shortcut.
-The whole Maine pilot is 94 KB of JSON, so fetching a SQLite file and a WASM
-engine to query it would cost the reader more bytes than simply handing them
-the answer. When coverage grows past roughly a megabyte the read path should
-switch to loading dist/tally.sqlite through sql.js with range requests, which
-is what the snapshot format and its manifest already exist to support. Only
-this module changes when that day comes.
+inlined. With money loaded for all fifty states the payload is now around a
+megabyte, which is the point at which that choice stops being obviously right.
+It still beats fetching a SQLite file plus a WASM engine for a reader who only
+wants one district, and it compresses to roughly a quarter of its size in
+transit. The next step when coverage grows is loading dist/tally.sqlite through
+sql.js with range requests, which the snapshot format and its manifest already
+exist to support; only this module changes when that day comes.
 
 It reads the SNAPSHOT, never Postgres. Whatever the export refused to publish
 is therefore invisible here too, and the page cannot accidentally show
@@ -26,8 +26,9 @@ SNAPSHOT = WEB.parent / "dist" / "tally.sqlite"
 MANIFEST = WEB.parent / "dist" / "tally.manifest.json"
 OUT = WEB / "index.html"
 
-# The pilot has data for one state. Widen this when coverage does.
-STATE = "ME"
+# Money now covers every state; promises cover Maine. The page includes any
+# candidate a reader could learn something about, and says plainly which kind
+# of coverage each district has.
 
 
 def _rows(con: sqlite3.Connection, sql: str, args: tuple = ()) -> list[dict]:
@@ -52,37 +53,37 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         SELECT c.candidacy_id, c.politician_id, c.full_name, c.party,
                c.incumbent_challenger, r.state, r.office, r.district
         FROM candidates c JOIN races r USING (race_id)
-        WHERE r.state = ?
-          AND c.politician_id IN (SELECT DISTINCT politician_id FROM promises)
-        ORDER BY r.district, c.party""", (STATE,))
+        WHERE c.candidacy_id IN (SELECT candidacy_id FROM finance WHERE total_receipts > 0)
+           OR c.politician_id IN (SELECT DISTINCT politician_id FROM promises)
+        ORDER BY r.state, r.office, r.district, c.party""")
     for candidate in candidates:
         candidate["display_name"] = display_name(candidate["full_name"])
 
-    ids = [c["politician_id"] for c in candidates]
-    if not ids:
+    if not candidates:
         raise RuntimeError(
-            f"no {STATE} candidates carry promises in the snapshot; "
+            "no candidates carry money or promises in the snapshot; "
             "rebuild it with: uv run python -m export.build_snapshot"
         )
-    marks = ",".join("?" * len(ids))
-    args = tuple(ids)
-    finance = _rows(
-        con, f"SELECT * FROM finance WHERE politician_id IN ({marks})", args
-    )
-    donors = _rows(con, f"""
-        SELECT * FROM top_donors
-        WHERE donor_rank <= 5
-          AND candidacy_id IN (
-              SELECT candidacy_id FROM candidates WHERE politician_id IN ({marks})
-          )""", args)
-    promises = _rows(
-        con, f"SELECT * FROM promises WHERE politician_id IN ({marks})", args
-    )
+    # Money columns are rounded to whole dollars and empty rows dropped. At
+    # national scale the page inlines its own data, so every field that
+    # survives is paid for in bytes the reader downloads.
+    finance = _rows(con, """
+        SELECT candidacy_id, politician_id, total_receipts, cash_on_hand,
+               pac_contributions_official
+        FROM finance WHERE total_receipts > 0""")
+    for row in finance:
+        for key in ("total_receipts", "cash_on_hand", "pac_contributions_official"):
+            row[key] = round(float(row[key] or 0))
+    donors = _rows(con, """
+        SELECT candidacy_id, committee_name, total_amount, donor_rank
+        FROM top_donors WHERE donor_rank <= 3""")
+    for row in donors:
+        row["total_amount"] = round(float(row["total_amount"] or 0))
     return {
         "candidates": candidates,
         "finance": finance,
         "donors": donors,
-        "promises": promises,
+        "promises": _rows(con, "SELECT * FROM promises"),
         "evaluations": _rows(con, "SELECT * FROM evaluations"),
         "evidence": _rows(con, "SELECT * FROM evidence"),
     }
@@ -103,6 +104,11 @@ def build() -> Path:
     counts = manifest["row_counts"]
 
     n_candidates = len(payload["candidates"])
+    states = len({c["state"] for c in payload["candidates"]})
+    researched = len({
+        c["state"] for c in payload["candidates"]
+        if c["politician_id"] in {p["politician_id"] for p in payload["promises"]}
+    })
     built_on = manifest["generated_at"][:10]
     css = (WEB / "app.css").read_text(encoding="utf-8")
     script = (WEB / "app.js").read_text(encoding="utf-8")
@@ -116,10 +122,16 @@ def build() -> Path:
     <p class="tagline">Who is running in your district, where their money comes from,
       what they promised, and how they actually voted. Every claim links to its source.</p>
   </div>
-  <div class="scope"><span>Pilot data</span><b>Maine &middot; 2026</b></div>
+  <div class="scope"><span>2026 cycle</span><b>{states} states</b></div>
 </div></header>
 
 <div class="wrap">
+  <div class="picker">
+    <label for="stateSel">State</label>
+    <select id="stateSel"></select>
+    <span class="hint">A dot marks a seat where promises have been researched.
+      Everywhere else shows campaign finance only, so far.</span>
+  </div>
   <div class="tabs" id="tabs" role="tablist"></div>
   <div class="race-head" id="raceHead"></div>
   <div class="grid" id="grid"></div>
@@ -130,12 +142,14 @@ def build() -> Path:
     found in the source document, character for character. An alignment verdict appears only
     if every vote it cites was checked in code against the legislator&rsquo;s own record.
     Where the record cannot settle a question, this page says so instead of scoring it.</p>
-    <p><strong>What this is not yet.</strong> This is a pilot covering {n_candidates} Maine
-    candidates, not all 435 districts. Snapshot built {built_on} and containing
-    {counts['races']} races, {counts['candidates']} candidates,
-    {counts['promises']} displayable promises and {counts['evaluations']} alignment
-    verdicts. Money figures are FEC filings; votes link to the House Clerk.
-    Identical treatment, identical method, every candidate.</p>
+    <p><strong>Where coverage stands.</strong> Campaign finance is loaded for all
+    {states} states: {n_candidates} candidates with FEC filings across {counts['races']} races.
+    Promises have been researched in {researched} state so far, because that step means
+    reading each candidate&rsquo;s own words rather than downloading a filing. This page
+    shows which is which instead of leaving a district looking empty.
+    Snapshot built {built_on}: {counts['promises']} displayable promises and
+    {counts['evaluations']} alignment verdicts. Money comes from FEC filings; votes link
+    to the House Clerk. Identical treatment, identical method, every candidate.</p>
   </footer>
 </div>
 <script>window.__TALLY__ = {data};</script>

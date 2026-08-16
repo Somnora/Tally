@@ -163,3 +163,14 @@ footer{margin-top:52px;padding-top:22px;border-top:1px solid var(--rule);
 @media (max-width:640px){ .wordmark{font-size:31px} .p-head{flex-direction:column;gap:10px}
   .p-meta{flex-direction:row;align-items:center} }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* national navigation */
+.picker{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.picker label{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.picker select{font:inherit;font-size:14px;padding:7px 11px;border-radius:2px;
+  border:1px solid var(--rule-strong);background:var(--raised);color:var(--ink);min-width:88px}
+.picker .hint{font-size:13px;color:var(--muted)}
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);
+  margin-left:7px;vertical-align:middle}
+.none{color:var(--muted);font-size:13.5px;line-height:1.6;margin:0}
+.pcount .none{border-top:1px dotted var(--rule);padding-top:12px}
