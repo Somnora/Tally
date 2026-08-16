@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # GPU-dependent stages (transcription, local LLM) run on Lambda instances,
     # never on this Mac. Code must check gpu_available before invoking them.
     vllm_base_url: str = ""
+    # Some model endpoints authenticate. A self-hosted vLLM on a private
+    # tunnel does not, but Manifold's OpenAI proxy does, and hardcoding
+    # "not-needed" at the call site made that unreachable without a code edit.
+    vllm_api_key: SecretStr = SecretStr("not-needed")
     local_model: str = ""
     gpu_available: bool = False
 

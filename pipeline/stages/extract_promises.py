@@ -87,7 +87,10 @@ def build_agent(model: Model | None = None) -> Agent[None, ExtractionResult]:
             )
         model = OpenAIChatModel(
             settings.local_model,
-            provider=OpenAIProvider(base_url=settings.vllm_base_url, api_key="not-needed"),
+            provider=OpenAIProvider(
+                base_url=settings.vllm_base_url,
+                api_key=settings.vllm_api_key.get_secret_value(),
+            ),
         )
     return Agent(
         model,
