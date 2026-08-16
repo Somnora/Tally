@@ -23,3 +23,7 @@ data/review/
 
 # Built snapshots: regenerated from Postgres, never source.
 dist/
+
+# Boundary geometry is derived, not authored: rebuild with the mapshaper
+# command in web/map.js if the district lines change.
+!data/geo/us_cd119.topo.json

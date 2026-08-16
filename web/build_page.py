@@ -24,6 +24,7 @@ from pathlib import Path
 WEB = Path(__file__).resolve().parent
 SNAPSHOT = WEB.parent / "dist" / "tally.sqlite"
 MANIFEST = WEB.parent / "dist" / "tally.manifest.json"
+GEO = WEB.parent / "data" / "geo" / "us_cd119.topo.json"
 OUT = WEB / "index.html"
 
 # Money now covers every state; promises cover Maine. The page includes any
@@ -111,8 +112,11 @@ def build() -> Path:
     })
     built_on = manifest["generated_at"][:10]
     css = (WEB / "app.css").read_text(encoding="utf-8")
-    script = (WEB / "app.js").read_text(encoding="utf-8")
+    # map.js first: it defines renderMap, which app.js calls on every render.
+    script = (WEB / "map.js").read_text(encoding="utf-8") + "\n" + \
+        (WEB / "app.js").read_text(encoding="utf-8")
     data = json.dumps(payload, separators=(",", ":"), default=str)
+    geo = GEO.read_text(encoding="utf-8").strip()
 
     OUT.write_text(f"""<title>Follow the Money</title>
 <style>{css}</style>
@@ -126,6 +130,7 @@ def build() -> Path:
 </div></header>
 
 <div class="wrap">
+  <div class="map-wrap"><div id="map"></div></div>
   <div class="picker">
     <label for="stateSel">State</label>
     <select id="stateSel"></select>
@@ -152,7 +157,8 @@ def build() -> Path:
     to the House Clerk. Identical treatment, identical method, every candidate.</p>
   </footer>
 </div>
-<script>window.__TALLY__ = {data};</script>
+<script>window.__TALLY_GEO__ = {geo};
+window.__TALLY__ = {data};</script>
 <script>{script}</script>
 """, encoding="utf-8")
     return OUT

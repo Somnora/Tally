@@ -24,6 +24,8 @@ let curState = STATES.includes('ME') ? 'ME' : STATES[0];
 let curSeat = null;
 let curCandidate = null;
 let curFilter = 'all';
+// 'nation' shows every state; 'state' zooms to one state's districts.
+let mapLevel = 'nation';
 
 function seatsIn(state){
   const seats = new Map();
@@ -174,14 +176,31 @@ function renderVerdict(ev){
   </div>`;
 }
 
-function render(){ renderNav(); renderRace(); renderDetail(); }
+function render(){ renderMap(); renderNav(); renderRace(); renderDetail(); }
+
+function selectState(code){
+  curState = code; curSeat = null; curCandidate = null; curFilter = 'all';
+  mapLevel = 'state';
+  render();
+}
 
 document.addEventListener('change', e => {
-  if(e.target.id==='stateSel'){
-    curState = e.target.value; curSeat = null; curCandidate = null; curFilter='all'; render();
-  }
+  if(e.target.id==='stateSel') selectState(e.target.value);
+});
+
+// Paths carry role="button" and tabindex, so they must answer the keyboard too.
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Enter' && e.key !== ' ') return;
+  const path = e.target.closest && e.target.closest('path[data-state], path[data-seat]');
+  if(path){ e.preventDefault(); path.dispatchEvent(new MouseEvent('click', {bubbles:true})); }
 });
 document.addEventListener('click', e => {
+  const mapState = e.target.closest('path[data-state]');
+  if(mapState){ selectState(mapState.dataset.state); return; }
+  const mapSeat = e.target.closest('path[data-seat]');
+  if(mapSeat){ curSeat=mapSeat.dataset.seat; curCandidate=null; curFilter='all'; render();
+    document.getElementById('raceHead').scrollIntoView({behavior:'smooth',block:'start'}); return; }
+  if(e.target.closest('[data-back]')){ mapLevel='nation'; render(); return; }
   const tab = e.target.closest('.tab');
   if(tab){ curSeat=tab.dataset.seat; curCandidate=null; curFilter='all'; render(); return; }
   const view = e.target.closest('.view-btn');
