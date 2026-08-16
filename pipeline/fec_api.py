@@ -5,7 +5,10 @@ steps on worker threads) to stay comfortably under the key's 7,500/hr limit.
 On HTTP 429 the client flips to the backup key if one is configured.
 
 Provenance discipline: callers get back the canonical request URL WITHOUT the
-api_key parameter — that is what goes into sources.url. Keys never leave this
+api_key parameter — that is what goes into sources.url. The key is sent as an
+X-Api-Key header rather than a query parameter, because httpx logs request
+URLs at INFO and a key in the query string would be copied into every log
+file and terminal scrollback. Keys never leave this
 module except inside the outgoing request itself.
 """
 
@@ -61,7 +64,8 @@ class FecApiClient:
             key = self._keys[self._active_key]
             try:
                 response = httpx.get(
-                    url, params={**params, "api_key": key}, timeout=30, follow_redirects=True
+                    url, params=params, headers={"X-Api-Key": key},
+                    timeout=30, follow_redirects=True,
                 )
                 if response.status_code == 429:
                     if len(self._keys) > 1:
