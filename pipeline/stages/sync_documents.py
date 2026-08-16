@@ -57,34 +57,68 @@ def _store_page(
     stats["documents_stored"] += 1
 
 
-def sync_campaign_site(
-    conn: db.Connection, politician_id: int, campaign_url: str
+def sync_site(
+    conn: db.Connection,
+    politician_id: int,
+    site_url: str,
+    *,
+    doc_type: str = "campaign_site",
+    source_type: str = "campaign_site_html",
+    homepage_title: str = "Campaign homepage",
 ) -> dict[str, Any]:
-    """Homepage + issue pages. Returns stats plus the page URLs (for wayback)."""
+    """Homepage + issue pages. Returns stats plus the page URLs (for wayback).
+
+    The same walk serves a campaign site and a member's official
+    house.gov/senate.gov site; only the labels differ, and they differ because
+    government speech and campaign speech are not the same claim about a
+    person even when the walk that finds them is identical.
+    """
     stats: StageStats = {"pages_fetched": 0, "pages_failed": 0,
                          "pages_without_content": 0, "documents_stored": 0}
     page_urls: list[str] = []
 
-    homepage = webdocs.client().get(campaign_url)
+    homepage = webdocs.client().get(site_url)
     if homepage is None:
         stats["pages_failed"] += 1
         return {"stats": stats, "page_urls": page_urls}
     stats["pages_fetched"] += 1
-    page_urls.append(campaign_url)
-    _store_page(conn, politician_id, campaign_url, homepage,
-                "campaign_site", "campaign_site_html", "Campaign homepage", stats)
+    page_urls.append(site_url)
+    _store_page(conn, politician_id, site_url, homepage,
+                doc_type, source_type, homepage_title, stats)
 
-    for link in webdocs.discover_issue_links(homepage, campaign_url):
+    for link in webdocs.discover_issue_links(homepage, site_url):
         html = webdocs.client().get(link)
         if html is None:
             stats["pages_failed"] += 1
             continue
         stats["pages_fetched"] += 1
         page_urls.append(link)
-        _store_page(conn, politician_id, link, html,
-                    "campaign_site", "campaign_site_html", None, stats)
+        _store_page(conn, politician_id, link, html, doc_type, source_type, None, stats)
 
     return {"stats": stats, "page_urls": page_urls}
+
+
+def sync_campaign_site(
+    conn: db.Connection, politician_id: int, campaign_url: str
+) -> dict[str, Any]:
+    """A candidate's own campaign site."""
+    return sync_site(conn, politician_id, campaign_url)
+
+
+def sync_official_site(
+    conn: db.Connection, politician_id: int, official_url: str
+) -> dict[str, Any]:
+    """A sitting member's house.gov or senate.gov site.
+
+    Stored as official_site, never campaign_site: this is a congressional
+    office publishing under rules that restrict campaign content, and a reader
+    is entitled to know which of the two they are looking at.
+    """
+    return sync_site(
+        conn, politician_id, official_url,
+        doc_type="official_site", source_type="official_site_html",
+        homepage_title="Official congressional website",
+    )
 
 
 def sync_wayback(conn: db.Connection, politician_id: int, page_urls: list[str]) -> StageStats:
