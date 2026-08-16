@@ -17,6 +17,7 @@ import psycopg
 from psycopg import sql as pgsql
 from psycopg.types.json import Jsonb
 
+from pipeline import evidence
 from pipeline.config import get_settings
 
 SQL_DIR = Path(__file__).resolve().parent.parent / "db" / "sql"
@@ -704,6 +705,170 @@ def mark_document_extracted(
         load_sql("update_document_extracted"),
         {"document_id": document_id, "model_name": model_name,
          "prompt_version": prompt_version},
+    )
+
+
+# -- evaluation (Milestone 5) --------------------------------------------------
+
+@dataclass(frozen=True)
+class PromiseForEvaluation:
+    promise_id: int
+    politician_id: int
+    full_name: str
+    verbatim_quote: str
+    topic: str
+    specificity: str
+
+
+@dataclass(frozen=True)
+class VoteContext:
+    """One pre-digested vote as the evaluation prompt will see it."""
+
+    vote_id: int
+    bill_key: str
+    title: str | None
+    policy_area: str | None
+    summary_text: str | None
+    position: str
+    vote_question: str
+    voted_at: date
+    congress_gov_url: str
+    is_procedural: bool
+    is_omnibus: bool
+
+
+def promises_for_evaluation(
+    conn: Connection, politician_id: int, *, model_name: str, prompt_version: str
+) -> list[PromiseForEvaluation]:
+    rows = conn.execute(
+        load_sql("select_promises_for_evaluation"),
+        {"politician_id": politician_id, "model_name": model_name,
+         "prompt_version": prompt_version},
+    ).fetchall()
+    return [
+        PromiseForEvaluation(int(r[0]), int(r[1]), str(r[2]), str(r[3]),
+                             str(r[4]), str(r[5]))
+        for r in rows
+    ]
+
+
+def votes_for_promise(
+    conn: Connection, politician_id: int, topic: str, limit: int = 25
+) -> list[VoteContext]:
+    """Topically relevant votes, deduplicated to one per bill."""
+    rows = conn.execute(
+        load_sql("select_votes_for_promise"),
+        {"politician_id": politician_id, "topic": topic, "limit": limit},
+    ).fetchall()
+    return [
+        VoteContext(
+            vote_id=int(r[0]), bill_key=str(r[1]), title=r[2], policy_area=r[3],
+            summary_text=r[4], position=str(r[5]), vote_question=str(r[6]),
+            voted_at=r[7], congress_gov_url=str(r[8]),
+            is_procedural=bool(r[9]), is_omnibus=bool(r[10]),
+        )
+        for r in rows
+    ]
+
+
+def vote_facts(conn: Connection, vote_ids: list[int]) -> dict[int, evidence.VoteFact]:
+    """Ground truth for cited votes, keyed by vote_id.
+
+    Ids the model invented simply do not come back, which is what makes
+    'unknown_record' detectable rather than assumed.
+    """
+    if not vote_ids:
+        return {}
+    rows = conn.execute(
+        load_sql("select_vote_facts_for_validation"), {"vote_ids": vote_ids}
+    ).fetchall()
+    return {
+        int(r[0]): evidence.VoteFact(
+            vote_id=int(r[0]), politician_id=int(r[1]), position=str(r[2]),
+            vote_question=str(r[3]), bill_key=r[4],
+            is_omnibus=bool(r[5]), is_procedural=bool(r[6]),
+        )
+        for r in rows
+    }
+
+
+def supersede_current_evaluation(conn: Connection, promise_id: int) -> None:
+    """Retire the live evaluation. Append-only: only is_current changes."""
+    conn.execute(load_sql("evaluation_supersede"), {"promise_id": promise_id})
+
+
+def insert_evaluation(
+    conn: Connection,
+    *,
+    promise_id: int,
+    status: str,
+    consistency_score: int | None,
+    llm_reasoning: str,
+    model_name: str,
+    prompt_version: str,
+    is_current: bool,
+) -> int:
+    """Store one evaluation. is_current = FALSE keeps a failed evaluation for
+    review while guaranteeing it can never reach the export view."""
+    evaluation_id = _returned_id(
+        conn.execute(
+            load_sql("evaluation_insert"),
+            {"promise_id": promise_id, "status": status,
+             "consistency_score": consistency_score,
+             "llm_reasoning": llm_reasoning, "model_name": model_name,
+             "prompt_version": prompt_version},
+        )
+    )
+    if not is_current:
+        conn.execute(
+            "UPDATE promise_evaluations SET is_current = FALSE WHERE evaluation_id = %s",
+            (evaluation_id,),
+        )
+    return evaluation_id
+
+
+def insert_evaluation_evidence(
+    conn: Connection,
+    *,
+    evaluation_id: int,
+    kind: str,
+    record_id: int,
+    direction: str,
+    validated: bool,
+) -> int:
+    """Store one citation. Only the id column matching `kind` is populated;
+    the schema CHECK and the per-kind foreign keys enforce the rest."""
+    columns: dict[str, int | None] = {
+        "vote_id": None, "donation_id": None, "filing_uuid": None, "document_id": None,
+    }
+    key = {"vote": "vote_id", "donation": "donation_id",
+           "lobbying_filing": "filing_uuid", "document": "document_id"}[kind]
+    columns[key] = record_id
+    return _returned_id(
+        conn.execute(
+            load_sql("evaluation_evidence_insert"),
+            {"evaluation_id": evaluation_id, "kind": kind, "direction": direction,
+             "validated": validated, **columns},
+        )
+    )
+
+
+def insert_citation_reject(
+    conn: Connection,
+    *,
+    evaluation_id: int,
+    kind: str,
+    cited_record_id: int,
+    direction: str,
+    reason: str,
+) -> None:
+    """Persist a citation that could not be stored as evidence, typically a
+    fabricated id. Kept because it is the sharpest available signal that a
+    prompt or model is unfit, and it never appears in the model's prose."""
+    conn.execute(
+        load_sql("evaluation_citation_reject_insert"),
+        {"evaluation_id": evaluation_id, "kind": kind,
+         "cited_record_id": cited_record_id, "direction": direction, "reason": reason},
     )
 
 
