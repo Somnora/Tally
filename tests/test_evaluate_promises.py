@@ -13,7 +13,13 @@ from typing import Any
 from pydantic_ai.models.test import TestModel
 
 from pipeline import db
-from pipeline.stages.evaluate_promises import PROMPT_VERSION, build_agent, evaluate_promises
+from pipeline.stages.evaluate_promises import (
+    PROMPT_VERSION,
+    EvidenceItem,
+    build_agent,
+    evaluate_promises,
+    render_votes,
+)
 
 MODEL = "test-model"
 
@@ -110,6 +116,20 @@ def _exported(conn: db.Connection, promise_id: int) -> int:
 def test_only_the_substantive_vote_reaches_the_prompt(conn: db.Connection) -> None:
     politician_id, _ = _seed(conn)
     _substantive_vote_id(conn, politician_id)
+
+
+def test_rendered_position_matches_the_token_the_schema_accepts(
+    conn: db.Connection,
+) -> None:
+    """The model is told to copy the position it sees. If the list renders
+    NAY while EvidenceItem.position only accepts "nay", every citation costs
+    a validation retry, so the rendered token has to be the accepted one."""
+    politician_id, _ = _seed(conn)
+    rendered = render_votes(db.votes_for_promise(conn, politician_id, "guns", 25))
+    assert "voted nay" in rendered
+    assert "voted NAY" not in rendered
+    accepted = EvidenceItem.model_fields["position"].annotation
+    assert "nay" in getattr(accepted, "__args__", ())
 
 
 def test_unmatched_topic_yields_no_votes(conn: db.Connection) -> None:

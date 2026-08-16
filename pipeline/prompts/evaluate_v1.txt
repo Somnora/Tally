@@ -39,7 +39,7 @@ A middle score means "evidence on both sides", which is the opposite of
 EVIDENCE. Cite the votes your answer rests on. Each citation carries three
 things: the vote_id, the position you read for it, and a direction.
 
-  position     copy YEA or NAY exactly as the list shows it for that vote_id.
+  position     copy yea or nay exactly as the list shows it for that vote_id.
                This is checked against the record. If it does not match, the
                citation is thrown away, because a misread vote cannot support
                a trustworthy conclusion.

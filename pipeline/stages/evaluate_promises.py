@@ -110,8 +110,11 @@ def render_votes(votes: list[db.VoteContext]) -> str:
             flags += " [OMNIBUS: bundles many unrelated provisions]"
         if vote.is_procedural:
             flags += " [PROCEDURAL: a vote on process, not policy]"
+        # Positions render lowercase so the text the model copies is exactly
+        # the token the output schema accepts. Showing "NAY" and requiring
+        # "nay" costs a validation retry on every single citation.
         lines.append(
-            f"[vote_id: {vote.vote_id}] {vote.bill_key} | voted {vote.position.upper()}"
+            f"[vote_id: {vote.vote_id}] {vote.bill_key} | voted {vote.position}"
             f" on '{vote.vote_question}' | {vote.voted_at}{flags}\n"
             f"    {vote.title or '(untitled)'}"
         )
