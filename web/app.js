@@ -273,7 +273,11 @@ document.addEventListener('click', e => {
   const mapState = e.target.closest('path[data-state]');
   if(mapState){ selectState(mapState.dataset.state); return; }
   const mapSeat = e.target.closest('path[data-seat]');
-  if(mapSeat){ curSeat=mapSeat.dataset.seat; curCandidate=null; curFilter='all'; render();
+  if(mapSeat){
+    // Frame the district before re-rendering: metro districts are otherwise
+    // too small to read once selected. Uses the clicked element's own bbox.
+    frameSeatPath(mapSeat);
+    curSeat=mapSeat.dataset.seat; curCandidate=null; curFilter='all'; render();
     document.getElementById('raceHead').scrollIntoView({behavior:'smooth',block:'start'}); return; }
   if(e.target.closest('[data-back]')){ mapLevel='nation'; render(); return; }
   const tab = e.target.closest('.tab');

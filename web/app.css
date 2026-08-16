@@ -253,3 +253,14 @@ a.rv .pos{font-family:ui-monospace,monospace;font-size:10.5px;text-transform:upp
 a.rv .rv-bill{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 a.rv .rv-bill b{font-family:ui-monospace,monospace;color:var(--ink)}
 a.rv .rv-date{font-family:ui-monospace,monospace;font-size:11px;color:var(--muted);flex:none}
+
+/* zoom and pan */
+svg.map{touch-action:none}
+svg.map.zoomed{cursor:grab}
+svg.map.zoomed:active{cursor:grabbing}
+.map-zoom{display:inline-flex;gap:4px}
+.map-zoom button{appearance:none;font:inherit;font-size:12.5px;line-height:1;cursor:pointer;
+  min-width:28px;padding:5px 8px;border-radius:2px;border:1px solid var(--rule-strong);
+  background:var(--raised);color:var(--ink)}
+.map-zoom button:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink)}
+.map-zoom button:disabled{opacity:.4;cursor:default}

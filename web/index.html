@@ -254,6 +254,17 @@ a.rv .pos{font-family:ui-monospace,monospace;font-size:10.5px;text-transform:upp
 a.rv .rv-bill{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 a.rv .rv-bill b{font-family:ui-monospace,monospace;color:var(--ink)}
 a.rv .rv-date{font-family:ui-monospace,monospace;font-size:11px;color:var(--muted);flex:none}
+
+/* zoom and pan */
+svg.map{touch-action:none}
+svg.map.zoomed{cursor:grab}
+svg.map.zoomed:active{cursor:grabbing}
+.map-zoom{display:inline-flex;gap:4px}
+.map-zoom button{appearance:none;font:inherit;font-size:12.5px;line-height:1;cursor:pointer;
+  min-width:28px;padding:5px 8px;border-radius:2px;border:1px solid var(--rule-strong);
+  background:var(--raised);color:var(--ink)}
+.map-zoom button:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink)}
+.map-zoom button:disabled{opacity:.4;cursor:default}
 </style>
 <header class="mast"><div class="mast-in">
   <div class="brand">
@@ -395,14 +406,207 @@ const DISTRICT_GEOMS = GEO.objects.districts.geometries
 function svgFrame(paths, inner, extraClass){
   const [x, y, w, h] = boundsOf(paths);
   const pad = Math.max(w, h) * 0.02;
-  return `<svg class="map ${extraClass||''}" viewBox="${Math.round(x-pad)} ${Math.round(y-pad)} `
-       + `${Math.round(w+pad*2)} ${Math.round(h+pad*2)}" role="img" `
-       + `aria-label="Clickable map">${inner}</svg>`;
+  mapBase = [Math.round(x - pad), Math.round(y - pad),
+             Math.round(w + pad * 2), Math.round(h + pad * 2)];
+  return `<svg class="map ${extraClass||''}" viewBox="${mapBase.join(' ')}" role="img" `
+       + `aria-label="Clickable map">`
+       + `<g class="mz" transform="${viewTransform()}">${inner}</g></svg>`;
 }
+
+/* -- zoom and pan ---------------------------------------------------------
+ * Congressional districts are equal-population, so a metro cluster is a knot
+ * of tiny shapes: Los Angeles packs a dozen districts into the area one rural
+ * district covers alone. Fitting a whole state makes those unclickable, which
+ * is the specific problem this solves.
+ *
+ * The view is a persistent {k, tx, ty} applied to a group inside the SVG,
+ * rather than a rewritten viewBox, so the fitted frame stays the reference
+ * for clamping and for framing a single district. It has to live outside the
+ * DOM because renderMap replaces the map's innerHTML on every render.
+ *
+ * Strokes are non-scaling: without that, borders thicken with the zoom and
+ * swallow exactly the small districts the zoom exists to reveal.
+ */
+
+const MAX_K = 60;
+let mapView = { k: 1, tx: 0, ty: 0 };
+let mapBase = [0, 0, 1, 1];     // the fitted viewBox of the current frame
+let mapFrameKey = null;         // resets the view when the frame changes
+let mapWired = false;
+
+const viewTransform = () =>
+  `translate(${mapView.tx} ${mapView.ty}) scale(${mapView.k})`;
+
+function applyView(){
+  const svg = document.querySelector('#map svg.map');
+  if(!svg) return;
+  const g = svg.querySelector('g.mz');
+  if(g) g.setAttribute('transform', viewTransform());
+  const zoomed = mapView.k > 1.01;
+  svg.classList.toggle('zoomed', zoomed);
+  const reset = document.querySelector('#map [data-zoom="reset"]');
+  if(reset) reset.disabled = !zoomed;
+}
+
+function clampView(){
+  const [x, y, w, h] = mapBase;
+  if(mapView.k <= 1){ mapView = { k: 1, tx: 0, ty: 0 }; return; }
+  if(mapView.k > MAX_K) mapView.k = MAX_K;
+  // Keep the content covering the frame, so it can never be dragged away.
+  const k = mapView.k;
+  mapView.tx = Math.min(x * (1 - k), Math.max((x + w) * (1 - k), mapView.tx));
+  mapView.ty = Math.min(y * (1 - k), Math.max((y + h) * (1 - k), mapView.ty));
+}
+
+function zoomAt(cx, cy, factor){
+  const k0 = mapView.k;
+  const k = Math.max(1, Math.min(MAX_K, k0 * factor));
+  // Hold the point under the cursor still while the scale changes.
+  mapView.tx = cx - (k / k0) * (cx - mapView.tx);
+  mapView.ty = cy - (k / k0) * (cy - mapView.ty);
+  mapView.k = k;
+  clampView(); applyView();
+}
+
+function svgPoint(svg, clientX, clientY){
+  const ctm = svg.getScreenCTM();
+  if(!ctm || !svg.createSVGPoint) return null;
+  const pt = svg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  const p = pt.matrixTransform(ctm.inverse());
+  return { x: p.x, y: p.y };
+}
+
+/* Frame one district. Called before the re-render that follows a click, so it
+ * only sets the view; applyView runs once the new paths exist. */
+function frameSeatPath(el){
+  if(!el || !el.getBBox) return;
+  let b;
+  try { b = el.getBBox(); } catch { return; }
+  if(!b || !b.width || !b.height) return;
+  const [x, y, w, h] = mapBase;
+  const k = Math.max(1, Math.min(MAX_K, 0.6 * Math.min(w / b.width, h / b.height)));
+  mapView.k = k;
+  mapView.tx = (x + w / 2) - k * (b.x + b.width / 2);
+  mapView.ty = (y + h / 2) - k * (b.y + b.height / 2);
+  clampView();
+}
+
+function pinchState(svg, pointers){
+  const [a, b] = [...pointers.values()];
+  if(!a || !b) return null;
+  const mid = svgPoint(svg, (a.x + b.x) / 2, (a.y + b.y) / 2);
+  if(!mid) return null;
+  return { dist: Math.hypot(a.x - b.x, a.y - b.y), cx: mid.x, cy: mid.y };
+}
+
+/* Listeners bind once to #map, which survives every re-render. */
+function wireMap(){
+  const host = document.getElementById('map');
+  if(mapWired || !host) return;
+  mapWired = true;
+
+  host.addEventListener('wheel', e => {
+    const svg = e.target.closest && e.target.closest('svg.map');
+    if(!svg) return;
+    e.preventDefault();
+    const p = svgPoint(svg, e.clientX, e.clientY);
+    if(p) zoomAt(p.x, p.y, e.deltaY < 0 ? 1.18 : 1 / 1.18);
+  }, { passive: false });
+
+  const pointers = new Map();
+  let travelled = 0, last = null, pinch = null;
+
+  host.addEventListener('pointerdown', e => {
+    const svg = e.target.closest && e.target.closest('svg.map');
+    if(!svg) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if(pointers.size === 1){ travelled = 0; last = svgPoint(svg, e.clientX, e.clientY); }
+    if(pointers.size === 2) pinch = pinchState(svg, pointers);
+  });
+
+  host.addEventListener('pointermove', e => {
+    if(!pointers.has(e.pointerId)) return;
+    const svg = document.querySelector('#map svg.map');
+    if(!svg) return;
+    const prev = pointers.get(e.pointerId);
+    travelled += Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if(pointers.size >= 2){
+      const now = pinchState(svg, pointers);
+      if(now && pinch && pinch.dist > 0){ zoomAt(pinch.cx, pinch.cy, now.dist / pinch.dist); }
+      pinch = now;
+      return;
+    }
+    if(mapView.k > 1 && last){
+      const p = svgPoint(svg, e.clientX, e.clientY);
+      if(!p) return;
+      mapView.tx += p.x - last.x;
+      mapView.ty += p.y - last.y;
+      last = p;
+      clampView(); applyView();
+    }
+  });
+
+  const release = e => {
+    pointers.delete(e.pointerId);
+    if(pointers.size < 2) pinch = null;
+    if(pointers.size === 0) last = null;
+  };
+  host.addEventListener('pointerup', release);
+  host.addEventListener('pointercancel', release);
+  host.addEventListener('pointerleave', release);
+
+  // A drag that ends over a district must not also select it.
+  host.addEventListener('click', e => {
+    if(travelled > 6){ e.stopPropagation(); e.preventDefault(); travelled = 0; }
+  }, true);
+
+  host.addEventListener('click', e => {
+    const btn = e.target.closest && e.target.closest('[data-zoom]');
+    if(!btn) return;
+    e.stopPropagation();
+    const [x, y, w, h] = mapBase;
+    const cx = x + w / 2, cy = y + h / 2;
+    if(btn.dataset.zoom === 'in') zoomAt(cx, cy, 1.5);
+    else if(btn.dataset.zoom === 'out') zoomAt(cx, cy, 1 / 1.5);
+    else { mapView = { k: 1, tx: 0, ty: 0 }; applyView(); }
+  });
+
+  host.addEventListener('keydown', e => {
+    const [x, y, w, h] = mapBase;
+    const cx = x + w / 2, cy = y + h / 2;
+    const step = 0.2 * w / mapView.k;
+    if(e.key === '+' || e.key === '=') zoomAt(cx, cy, 1.4);
+    else if(e.key === '-' || e.key === '_') zoomAt(cx, cy, 1 / 1.4);
+    else if(e.key === '0'){ mapView = { k: 1, tx: 0, ty: 0 }; applyView(); }
+    else if(e.key === 'ArrowLeft')  mapView.tx += step;
+    else if(e.key === 'ArrowRight') mapView.tx -= step;
+    else if(e.key === 'ArrowUp')    mapView.ty += step;
+    else if(e.key === 'ArrowDown')  mapView.ty -= step;
+    else return;
+    e.preventDefault();
+    clampView(); applyView();
+  });
+}
+
+const ZOOM_CONTROLS = `<span class="map-zoom">
+      <button type="button" data-zoom="out" title="Zoom out" aria-label="Zoom out">&minus;</button>
+      <button type="button" data-zoom="in" title="Zoom in" aria-label="Zoom in">+</button>
+      <button type="button" data-zoom="reset" title="Reset zoom" aria-label="Reset zoom" disabled>Reset</button>
+    </span>`;
 
 function renderMap(){
   const host = document.getElementById('map');
   if(!host) return;
+
+  // Changing frame means the old pan/zoom is meaningless; start fitted.
+  const frameKey = mapLevel === 'nation' ? 'nation' : 'state:' + curState;
+  if(frameKey !== mapFrameKey){
+    mapFrameKey = frameKey;
+    mapView = { k: 1, tx: 0, ty: 0 };
+  }
 
   if(mapLevel === 'nation'){
     const inner = STATE_GEOMS.map(s => {
@@ -418,8 +622,10 @@ function renderMap(){
       <div class="map-legend">
         <span><i class="sw researched"></i>promises researched</span>
         <span><i class="sw funded"></i>finance only</span>
+        ${ZOOM_CONTROLS}
         <span class="map-hint">Click a state to see its districts</span>
       </div>`;
+    wireMap(); applyView();
     return;
   }
 
@@ -439,9 +645,12 @@ function renderMap(){
   host.innerHTML = svgFrame(ds, inner, 'state-level') + `
     <div class="map-legend">
       <button class="map-back" data-back="1">&larr; All states</button>
+      ${ZOOM_CONTROLS}
       <span class="map-hint">${curState} &middot; ${ds.length} district${ds.length===1?'':'s'}
-        &middot; Senate seats are statewide, use the tabs</span>
+        &middot; scroll or pinch to zoom, drag to pan &middot; Senate seats are
+        statewide, use the tabs</span>
     </div>`;
+  wireMap(); applyView();
 }
 
 const DATA = window.__TALLY__;
@@ -719,7 +928,11 @@ document.addEventListener('click', e => {
   const mapState = e.target.closest('path[data-state]');
   if(mapState){ selectState(mapState.dataset.state); return; }
   const mapSeat = e.target.closest('path[data-seat]');
-  if(mapSeat){ curSeat=mapSeat.dataset.seat; curCandidate=null; curFilter='all'; render();
+  if(mapSeat){
+    // Frame the district before re-rendering: metro districts are otherwise
+    // too small to read once selected. Uses the clicked element's own bbox.
+    frameSeatPath(mapSeat);
+    curSeat=mapSeat.dataset.seat; curCandidate=null; curFilter='all'; render();
     document.getElementById('raceHead').scrollIntoView({behavior:'smooth',block:'start'}); return; }
   if(e.target.closest('[data-back]')){ mapLevel='nation'; render(); return; }
   const tab = e.target.closest('.tab');
