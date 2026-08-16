@@ -708,6 +708,14 @@ def mark_document_extracted(
     )
 
 
+def states_for_cycle(conn: Connection, cycle: int) -> list[str]:
+    """Every state holding a race this cycle, for national runs."""
+    return [
+        str(r[0])
+        for r in conn.execute(load_sql("select_states_for_cycle"), {"cycle": cycle}).fetchall()
+    ]
+
+
 def promises_for_gate(
     conn: Connection, *, gate_version: str, only_unscreened: bool = True
 ) -> list[tuple[int, str]]:

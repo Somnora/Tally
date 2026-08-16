@@ -1,4 +1,4 @@
-"""FEC itemized contributions for ONE state's candidates (Milestone 2).
+"""FEC itemized contributions, for one state or nationally (Milestone 2).
 
 Two bulk files feed the donations table:
 
@@ -45,6 +45,8 @@ from pipeline.etl.fec_bulk import BULK_BASE, USER_AGENT, download, parse_header,
 
 logger = logging.getLogger(__name__)
 
+# Rows per write. Small enough that a national pass never holds a whole
+# bulk file's matched rows in memory before the first write.
 BATCH_SIZE = 5_000
 PROGRESS_EVERY = 5_000_000
 IE_TYPES = frozenset({"24A", "24E"})
@@ -244,14 +246,21 @@ def load(state: str, cycle: int, skip_indiv: bool, refresh_downloads: bool) -> d
                 conn, source_type="fec_bulk_pas2", url=pas2_url,
                 content_hash=hashlib.sha256(pas2_zip).hexdigest(), raw_payload=pas2_zip,
             )
+            # Flushed in chunks: a national pass matches far more rows than one
+            # state's, and holding every matched donation in memory before the
+            # first write is how a one-state loader quietly fails at fifty.
             batch: list[dict[str, Any]] = []
             for row in parse_pipe_file(pas2_zip, pas2_header):
                 stats["pas2_rows_scanned"] += 1
                 donation = pas2_row_to_donation(row, ctx, pas2_source_id, stats)
                 if donation is not None:
                     batch.append(donation)
+                    stats["pas2_rows_loaded"] += 1
+                    if len(batch) >= BATCH_SIZE:
+                        db.upsert_donations_bulk(conn, batch)
+                        batch.clear()
             db.upsert_donations_bulk(conn, batch)
-            stats["pas2_rows_loaded"] = len(batch)
+            batch.clear()
             logger.info("pas2: %d of %d rows are %s candidates'",
                         len(batch), stats["pas2_rows_scanned"], state)
 
@@ -295,7 +304,9 @@ def load(state: str, cycle: int, skip_indiv: bool, refresh_downloads: bool) -> d
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--state", required=True, help="two-letter state, e.g. ME")
+    parser.add_argument("--state", required=True,
+                        help="two-letter state (e.g. ME), or ALL for every state; "
+                             "ALL streams the bulk files once rather than fifty times")
     parser.add_argument("--cycle", type=int, default=2026)
     parser.add_argument("--skip-indiv", action="store_true",
                         help="load only the small pas2 file (fast validation)")

@@ -349,13 +349,42 @@ def extraction_run() -> dict[str, int]:
     return totals
 
 
+def finance_run(state: str, cycle: int) -> dict[str, int]:
+    """One state, or every state in the cycle when given ALL.
+
+    States run in sequence rather than concurrently on purpose: the FEC client
+    throttles globally to stay under the key's hourly limit, so running them in
+    parallel would buy nothing and only make a rate-limit trip harder to read.
+    A state that fails is logged and skipped, because losing Wyoming must not
+    cost the other forty nine.
+    """
+    if state != "ALL":
+        return state_finance_run(state, cycle)
+
+    with db.connect() as conn:
+        states = db.states_for_cycle(conn, cycle)
+    logger.info("national finance run: %d states, cycle %d", len(states), cycle)
+
+    totals: dict[str, int] = {"states": len(states)}
+    for index, one in enumerate(states, start=1):
+        logger.info("--- %s (%d/%d) ---", one, index, len(states))
+        try:
+            for key, value in state_finance_run(one, cycle).items():
+                totals[key] = totals.get(key, 0) + value
+        except Exception:
+            logger.exception("state %s failed; continuing", one)
+            totals["failed_states"] = totals.get("failed_states", 0) + 1
+    return totals
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
     finance = sub.add_parser("finance", help="official FEC totals per candidate")
-    finance.add_argument("--state", required=True)
+    finance.add_argument("--state", required=True,
+                         help="two-letter state, or ALL for every state in the cycle")
     finance.add_argument("--cycle", type=int, default=2026)
 
     votes = sub.add_parser("votes", help="roll-call votes for both chambers")
@@ -372,7 +401,7 @@ def main() -> None:
     DBOS.launch()
     try:
         if args.command == "finance":
-            totals = state_finance_run(args.state.upper(), args.cycle)
+            totals = finance_run(args.state.upper(), args.cycle)
         elif args.command == "documents":
             totals = documents_run(args.seed, args.cycle)
         elif args.command == "extract":
