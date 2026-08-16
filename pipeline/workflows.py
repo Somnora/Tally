@@ -46,8 +46,12 @@ DBOS(config=DBOSConfig(
     run_admin_server=False,
 ))
 
-# Concurrency 3: gentle on the FEC API (the client throttles globally too).
-candidate_queue = Queue("candidates", concurrency=3)
+# Concurrency 6. The HTTP-bound stages are unaffected: the FEC and web clients
+# throttle globally regardless of how many workflows are in flight. It matters
+# for extraction, which is GPU-bound and was leaving the model idle between
+# sequential calls; vLLM serves --max-num-seqs 8, so six candidates at once
+# stays inside its batch window instead of queueing behind it.
+candidate_queue = Queue("candidates", concurrency=6)
 
 
 # --- steps: each opens its own connection; upserts make retries safe --------
