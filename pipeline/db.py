@@ -8,6 +8,7 @@ Rules enforced here:
 """
 
 from dataclasses import dataclass
+from datetime import date
 from functools import cache
 from pathlib import Path
 from typing import Any, LiteralString, cast
@@ -381,6 +382,80 @@ def crosswalk_members(conn: Connection) -> list[tuple[str, str, int]]:
         (str(r[0]), str(r[1]), int(r[2]))
         for r in conn.execute(load_sql("select_crosswalk_members")).fetchall()
     ]
+
+
+# -- bills (Milestone 5) -------------------------------------------------------
+
+def politician_id_by_name(conn: Connection, name: str) -> int | None:
+    """Resolve a full name to one politician_id, or None if unknown.
+
+    Raises on an ambiguous name rather than picking one: silently choosing
+    the wrong Collins would attribute a voting record to the wrong person.
+    """
+    rows = conn.execute(load_sql("select_politician_by_name"), {"name": name}).fetchall()
+    if not rows:
+        return None
+    if len(rows) > 1 and str(rows[0][1]) != name:
+        candidates = ", ".join(str(r[1]) for r in rows[:5])
+        raise ValueError(f"{name!r} matches several politicians: {candidates}")
+    return int(rows[0][0])
+
+
+def bill_keys_needing_metadata(
+    conn: Connection, politician_id: int | None = None
+) -> list[tuple[int, str]]:
+    """(congress, bill_key) pairs that were voted on but have no bills row.
+
+    Passing a politician_id restricts the backfill to that member's record,
+    which is how the pilot runs it before committing to every chamber.
+    """
+    rows = conn.execute(
+        load_sql("select_bill_keys_needing_metadata"),
+        {"politician_id": politician_id},
+    ).fetchall()
+    return [(int(r[0]), str(r[1])) for r in rows]
+
+
+def upsert_bill(
+    conn: Connection,
+    *,
+    congress: int,
+    bill_key: str,
+    bill_type: str,
+    bill_number: int,
+    title: str | None,
+    policy_area: str | None,
+    subjects: list[str],
+    summary_text: str | None,
+    introduced_date: date | None,
+    latest_action: str | None,
+    latest_action_date: date | None,
+    sponsor_bioguide: str | None,
+    congress_gov_url: str,
+    source_id: int | None,
+) -> int:
+    """Idempotent on (congress, bill_key); refreshes mutable fields."""
+    return _returned_id(
+        conn.execute(
+            load_sql("bill_upsert"),
+            {
+                "congress": congress,
+                "bill_key": bill_key,
+                "bill_type": bill_type,
+                "bill_number": bill_number,
+                "title": title,
+                "policy_area": policy_area,
+                "subjects": subjects,
+                "summary_text": summary_text,
+                "introduced_date": introduced_date,
+                "latest_action": latest_action,
+                "latest_action_date": latest_action_date,
+                "sponsor_bioguide": sponsor_bioguide,
+                "congress_gov_url": congress_gov_url,
+                "source_id": source_id,
+            },
+        )
+    )
 
 
 # -- documents / media (Milestone 4) -------------------------------------------
