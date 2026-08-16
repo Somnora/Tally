@@ -84,6 +84,15 @@ TABLES: tuple[TableSpec, ...] = (
               ("promise_id",)),
     TableSpec("evidence", "export_evidence", (),
               ("evaluation_id",)),
+    # An incumbent's own record. Without these a sitting member's card can
+    # only say what they raised, while their entire voting history sits
+    # unused in the database.
+    TableSpec("member_record", "export_member_record", ("cycle",),
+              ("politician_id",)),
+    TableSpec("member_topics", "export_member_topics", ("cycle",),
+              ("politician_id",)),
+    TableSpec("recent_votes", "export_recent_votes", ("cycle",),
+              ("politician_id",)),
 )
 
 

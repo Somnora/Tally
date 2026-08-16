@@ -175,27 +175,81 @@ footer{margin-top:52px;padding-top:22px;border-top:1px solid var(--rule);
 .none{color:var(--muted);font-size:13.5px;line-height:1.6;margin:0}
 .pcount .none{border-top:1px dotted var(--rule);padding-top:12px}
 
-/* map */
+/* map
+   The map keeps a light cartographic ground in BOTH themes, the way a printed
+   inset does. It is a figure on the page, not a surface of it, and flipping it
+   dark made district fills sit within a few percent of the page ground where
+   the boundaries between them disappeared.
+   Boundaries are drawn a full step darker than the fill they separate, and
+   use non-scaling-stroke so a hairline stays a hairline whether the viewBox
+   is the whole country or one state. */
+:root{
+  --map-bare:#E7EBE7; --map-fill:#D6DED8; --map-research:#8FC3B2;
+  --map-line:#8A978F; --map-hot:#4E8E7C; --map-on:#2C5A4F;
+}
 .map-wrap{margin-bottom:22px}
 svg.map{display:block;width:100%;height:auto;max-height:52vh;margin:0 auto}
 svg.map.state-level{max-height:46vh}
-svg.map path{stroke:var(--paper);stroke-width:1200;stroke-linejoin:round;cursor:pointer;
-  transition:fill .12s ease}
-svg.map.state-level path{stroke-width:900}
-svg.map path.bare{fill:var(--rule)}
-svg.map path.funded{fill:var(--rule-strong)}
-svg.map path.researched{fill:var(--accent);fill-opacity:.55}
-svg.map path:hover{fill:var(--accent-ink);fill-opacity:.85}
-svg.map path.on{fill:var(--accent-ink);fill-opacity:1}
-svg.map path:focus-visible{outline:none;stroke:var(--ink);stroke-width:2600}
+svg.map path{
+  stroke:var(--map-line); stroke-width:.9; vector-effect:non-scaling-stroke;
+  stroke-linejoin:round; cursor:pointer; transition:fill .12s ease;
+}
+svg.map path.bare{fill:var(--map-bare)}
+svg.map path.funded{fill:var(--map-fill)}
+svg.map path.researched{fill:var(--map-research)}
+svg.map path:hover{fill:var(--map-hot);stroke-width:1.6}
+svg.map path.on{fill:var(--map-on);stroke:var(--map-on);stroke-width:1.6}
+svg.map path:focus-visible{outline:none;stroke:var(--ink);stroke-width:2.4}
 .map-legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:10px;
   font-size:12.5px;color:var(--muted)}
 .map-legend span{display:flex;gap:6px;align-items:center}
-.map-legend i.sw{width:11px;height:11px;border-radius:2px;display:inline-block}
-.map-legend i.sw.researched{background:var(--accent);opacity:.55}
-.map-legend i.sw.funded{background:var(--rule-strong)}
+.map-legend i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;
+  border:1px solid var(--map-line)}
+.map-legend i.sw.researched{background:var(--map-research)}
+.map-legend i.sw.funded{background:var(--map-fill)}
 .map-hint{margin-left:auto;text-align:right}
 .map-back{appearance:none;font:inherit;font-size:12.5px;cursor:pointer;padding:5px 11px;
   border-radius:2px;border:1px solid var(--rule-strong);background:var(--raised);color:var(--ink)}
 .map-back:hover{border-color:var(--accent);color:var(--accent-ink)}
 @media (max-width:640px){ .map-hint{margin-left:0;text-align:left;width:100%} }
+
+/* funding mix, outside spending, voting record */
+.mix{display:flex;height:7px;border-radius:2px;overflow:hidden;background:var(--rule)}
+.mix .seg{display:block;height:100%}
+.mix .seg.small{background:var(--accent)}
+.mix .seg.indiv{background:var(--accent-ink);opacity:.62}
+.mix .seg.pac{background:var(--warn);opacity:.8}
+.mix-key{display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;color:var(--muted);margin-top:2px}
+.mix-key span{display:flex;gap:5px;align-items:center}
+.mix-key i.sw{width:9px;height:9px;border-radius:2px;display:inline-block}
+.mix-key i.sw.small{background:var(--accent)}
+.mix-key i.sw.indiv{background:var(--accent-ink);opacity:.62}
+.mix-key i.sw.pac{background:var(--warn);opacity:.8}
+
+.outside{padding:14px 20px;border-bottom:1px solid var(--rule)}
+.outside h4{margin:0 0 8px;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);font-weight:600}
+.out-row{display:flex;justify-content:space-between;font-size:13.5px;padding:2px 0}
+.out-row b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-variant-numeric:tabular-nums;font-weight:600}
+.out-note{margin:7px 0 0;font-size:11.5px;color:var(--muted);line-height:1.5}
+
+.record{padding:16px 20px;border-bottom:1px solid var(--rule)}
+.record h4{margin:0 0 10px;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:baseline}
+.record .yrs{letter-spacing:normal;text-transform:none;font-weight:400;
+  font-family:ui-monospace,monospace;font-size:11.5px}
+.topics{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tp{font-size:11.5px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--rule);
+  border-radius:2px;padding:3px 8px;display:flex;gap:6px;align-items:baseline}
+.tp i{font-style:normal;font-family:ui-monospace,monospace;font-size:10.5px;color:var(--muted)}
+.recent h5{margin:0 0 7px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);font-weight:600}
+a.rv{display:flex;gap:10px;align-items:baseline;padding:7px 0;font-size:13px;
+  border-top:1px solid var(--rule);text-decoration:none;color:var(--ink-soft)}
+a.rv:hover{color:var(--accent-ink)}
+a.rv .pos{font-family:ui-monospace,monospace;font-size:10.5px;text-transform:uppercase;
+  border:1px solid var(--rule-strong);border-radius:2px;padding:1px 6px;flex:none;color:var(--ink)}
+a.rv .rv-bill{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+a.rv .rv-bill b{font-family:ui-monospace,monospace;color:var(--ink)}
+a.rv .rv-date{font-family:ui-monospace,monospace;font-size:11px;color:var(--muted);flex:none}

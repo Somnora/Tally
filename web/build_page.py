@@ -70,16 +70,36 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
     # survives is paid for in bytes the reader downloads.
     finance = _rows(con, """
         SELECT candidacy_id, politician_id, total_receipts, cash_on_hand,
-               pac_contributions_official
+               pac_contributions_official, individual_itemized_official,
+               individual_unitemized, ie_support, ie_oppose
         FROM finance WHERE total_receipts > 0""")
+    money_cols = ("total_receipts", "cash_on_hand", "pac_contributions_official",
+                  "individual_itemized_official", "individual_unitemized",
+                  "ie_support", "ie_oppose")
     for row in finance:
-        for key in ("total_receipts", "cash_on_hand", "pac_contributions_official"):
+        for key in money_cols:
             row[key] = round(float(row[key] or 0))
     donors = _rows(con, """
         SELECT candidacy_id, committee_name, total_amount, donor_rank
         FROM top_donors WHERE donor_rank <= 3""")
     for row in donors:
         row["total_amount"] = round(float(row["total_amount"] or 0))
+    # An incumbent's own voting record. Restricted to people actually shown,
+    # so members who are not on this year's ballot cost the reader nothing.
+    on_page = {c["politician_id"] for c in candidates}
+    record = [r for r in _rows(con, "SELECT * FROM member_record")
+              if r["politician_id"] in on_page]
+    topics = [r for r in _rows(con, "SELECT * FROM member_topics")
+              if r["politician_id"] in on_page]
+    votes = [r for r in _rows(con, "SELECT * FROM recent_votes")
+             if r["politician_id"] in on_page]
+    for row in votes:                      # titles are the bulk of this table
+        if row.get("bill_title"):
+            row["bill_title"] = row["bill_title"][:96]
+        row.pop("vote_question", None)     # filtered to substantive already
+        row.pop("policy_area", None)       # the topics table covers this
+    for row in candidates:
+        row.pop("full_name", None)         # display_name is what the page shows
     return {
         "candidates": candidates,
         "finance": finance,
@@ -87,6 +107,9 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         "promises": _rows(con, "SELECT * FROM promises"),
         "evaluations": _rows(con, "SELECT * FROM evaluations"),
         "evidence": _rows(con, "SELECT * FROM evidence"),
+        "record": record,
+        "topics": topics,
+        "votes": votes,
     }
 
 
@@ -104,11 +127,25 @@ def build() -> Path:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     counts = manifest["row_counts"]
 
-    n_candidates = len(payload["candidates"])
-    states = len({c["state"] for c in payload["candidates"]})
+    # The bulk tables ship column-wise: {cols, rows}. Repeating
+    # "pac_contributions_official" across 2,730 rows costs 76 KB in key names
+    # alone, and the reader downloads every byte. app.js rehydrates them into
+    # ordinary objects at load, so nothing downstream knows the difference.
+    for name in ("candidates", "finance", "donors", "votes", "topics", "record"):
+        rows = payload[name]
+        if not rows:
+            payload[name] = {"cols": [], "rows": []}
+            continue
+        cols = list(rows[0])
+        payload[name] = {"cols": cols, "rows": [[r.get(c) for c in cols] for r in rows]}
+
+    n_candidates = len(payload["candidates"]["rows"])
+    ci = payload["candidates"]["cols"]
+    state_at, pol_at = ci.index("state"), ci.index("politician_id")
+    with_promises = {p["politician_id"] for p in payload["promises"]}
+    states = len({r[state_at] for r in payload["candidates"]["rows"]})
     researched = len({
-        c["state"] for c in payload["candidates"]
-        if c["politician_id"] in {p["politician_id"] for p in payload["promises"]}
+        r[state_at] for r in payload["candidates"]["rows"] if r[pol_at] in with_promises
     })
     built_on = manifest["generated_at"][:10]
     css = (WEB / "app.css").read_text(encoding="utf-8")

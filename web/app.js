@@ -1,4 +1,17 @@
 const DATA = window.__TALLY__;
+
+/* Bulk tables arrive column-wise to keep the download small; rehydrate them
+   into plain objects once, so every render function below reads normally. */
+for(const name of ['candidates','finance','donors','votes','topics','record']){
+  const t = DATA[name];
+  if(t && !Array.isArray(t)){
+    DATA[name] = t.rows.map(r => {
+      const o = {};
+      t.cols.forEach((c,i) => { o[c] = r[i]; });
+      return o;
+    });
+  }
+}
 const ROLE = {I:'Incumbent', C:'Challenger', O:'Open seat'};
 const OFFICE = {house:'US House', senate:'US Senate'};
 const usd = n => (n==null||n==='') ? '--' : '$' + Number(n).toLocaleString('en-US');
@@ -9,6 +22,9 @@ const financeFor = c => DATA.finance.find(f => f.candidacy_id===c.candidacy_id) 
 const promisesFor = c => byId(DATA.promises,'politician_id',c.politician_id);
 const evalFor = pid => DATA.evaluations.find(e => e.promise_id===pid);
 const receiptsFor = eid => byId(DATA.evidence,'evaluation_id',eid);
+const recordFor = c => (DATA.record||[]).find(r => r.politician_id===c.politician_id);
+const topicsFor = c => byId(DATA.topics||[],'politician_id',c.politician_id);
+const votesFor  = c => byId(DATA.votes||[],'politician_id',c.politician_id);
 
 // Districts that have had documents read and promises extracted. Everywhere
 // else shows money only, and says so rather than looking empty.
@@ -80,12 +96,13 @@ function renderRace(){
       <dl class="money">
         <div class="money-row"><dt>Total raised</dt><dd>${usd(f.total_receipts)}</dd></div>
         <div class="money-row"><dt>Cash on hand</dt><dd>${usd(f.cash_on_hand)}</dd></div>
-        ${raised?`<div class="bar"><span style="width:${pacPct}%"></span></div>
-        <div class="bar-cap"><span>${pacPct}% from committees &amp; PACs</span><span>${usd(pac)}</span></div>`:''}
+        ${raised?moneyMix(f, raised):''}
       </dl>
+      ${outsideMoney(f)}
       ${donors.length?`<div class="donors"><h4>Largest committee donors</h4>${donors.map(d=>
         `<div class="donor"><span>${esc(d.committee_name||'')}</span><span>${usd(d.total_amount)}</span></div>`
       ).join('')}</div>`:''}
+      ${votingRecord(c)}
       <div class="pcount">
         <h4>Promises on record</h4>
         ${ps.length ? `<div class="tally-row">
@@ -96,9 +113,9 @@ function renderRace(){
           <button class="view-btn" data-p="${c.politician_id}">
             ${curCandidate===c.politician_id?'Showing promises below':'Show promises &amp; record'}
           </button>`
-        : `<p class="none">No promises researched yet. Money above comes from FEC filings,
-             which cover every candidate. Promises require reading this candidate&rsquo;s own
-             words, which has been done for Maine so far.</p>`}
+        : `<p class="none">Promises not researched yet. Money comes from FEC filings, which
+             cover every candidate;${recordFor(c)?' the voting record above is this member&rsquo;s own.':''}
+             Promises require reading a candidate&rsquo;s own words, done for Maine so far.</p>`}
       </div>
     </article>`;
   }).join('') || `<p class="none">No candidates with FEC filings in this seat.</p>`;
@@ -173,6 +190,64 @@ function renderVerdict(ev){
         <a href="${esc(r.congress_gov_url)}" target="_blank" rel="noopener">record</a>
       </div>`).join('')}
     </div>
+  </div>`;
+}
+
+/* Where the money came from, as proportions rather than one PAC percentage.
+   Small-dollar versus itemized versus committee money is the distinction a
+   reader is actually looking for, and all three are already in the filing. */
+function moneyMix(f, raised){
+  const parts = [
+    {k:'small', label:'Small donors', v:Number(f.individual_unitemized||0)},
+    {k:'indiv', label:'Itemized individuals', v:Number(f.individual_itemized_official||0)},
+    {k:'pac',   label:'Committees &amp; PACs', v:Number(f.pac_contributions_official||0)},
+  ].filter(p => p.v > 0);
+  if(!parts.length) return '';
+  const known = parts.reduce((s,p)=>s+p.v, 0) || 1;
+  return `<div class="mix" role="img" aria-label="Funding sources">
+      ${parts.map(p=>`<span class="seg ${p.k}" style="width:${(p.v/known*100).toFixed(1)}%"
+        title="${p.label}: ${usd(p.v)}"></span>`).join('')}
+    </div>
+    <div class="mix-key">${parts.map(p=>
+      `<span><i class="sw ${p.k}"></i>${p.label} ${Math.round(p.v/known*100)}%</span>`).join('')}</div>`;
+}
+
+/* Independent expenditures: money spent for or against a candidate by people
+   the candidate does not control, and does not report. Worth its own line
+   because it is invisible in a fundraising total. */
+function outsideMoney(f){
+  const forC = Number(f.ie_support||0), against = Number(f.ie_oppose||0);
+  if(!forC && !against) return '';
+  return `<div class="outside"><h4>Outside spending</h4>
+    <div class="out-row"><span>Supporting</span><b>${usd(forC)}</b></div>
+    <div class="out-row"><span>Opposing</span><b>${usd(against)}</b></div>
+    <p class="out-note">Spent independently by other groups, not by the campaign.</p></div>`;
+}
+
+/* A sitting member's own record. This is what a card shows instead of an
+   apology when nobody has researched their promises yet. */
+function votingRecord(c){
+  const r = recordFor(c);
+  if(!r) return '';
+  const topics = topicsFor(c).slice(0,4);
+  const votes = votesFor(c);
+  const span = [r.first_vote, r.last_vote].filter(Boolean).map(d=>String(d).slice(0,4));
+  const years = span.length===2 && span[0]!==span[1] ? `${span[0]}&ndash;${span[1]}` : (span[0]||'');
+  return `<div class="record">
+    <h4>Voting record ${years?`<span class="yrs">${years}</span>`:''}</h4>
+    <div class="tally-row">
+      <span class="chip"><b>${Number(r.roll_calls).toLocaleString('en-US')}</b> roll calls</span>
+      <span class="chip"><b>${Number(r.yea).toLocaleString('en-US')}</b> yea</span>
+      <span class="chip"><b>${Number(r.nay).toLocaleString('en-US')}</b> nay</span>
+    </div>
+    ${topics.length?`<div class="topics">${topics.map(t=>
+      `<span class="tp">${esc(t.policy_area)}<i>${t.votes}</i></span>`).join('')}</div>`:''}
+    ${votes.length?`<div class="recent"><h5>Most recent votes</h5>${votes.map(v=>
+      `<a class="rv" href="${esc(v.congress_gov_url)}" target="_blank" rel="noopener">
+         <span class="pos">${esc(v.position)}</span>
+         <span class="rv-bill"><b>${esc(v.bill_number||'')}</b> ${esc(v.bill_title||'')}</span>
+         <span class="rv-date">${esc(String(v.voted_at).slice(0,10))}</span>
+       </a>`).join('')}</div>`:''}
   </div>`;
 }
 
