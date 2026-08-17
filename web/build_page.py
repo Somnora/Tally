@@ -37,6 +37,26 @@ def _rows(con: sqlite3.Connection, sql: str, args: tuple = ()) -> list[dict]:
     return [dict(r) for r in con.execute(sql, args)]
 
 
+def _bill_lookup(vote_rows: list[dict]) -> dict[str, dict]:
+    """One entry per bill, so a summary travels once instead of once per promise."""
+    bills: dict[str, dict] = {}
+    for row in vote_rows:
+        key = row["bill_key"]
+        if key not in bills:
+            bills[key] = {
+                "title": row["title"],
+                "summary": row["summary"],
+                "has_summary": row["has_summary"],
+            }
+    return bills
+
+
+def _thin_votes(vote_rows: list[dict]) -> list[dict]:
+    """Per-vote facts only; the bill text is looked up by key in the app."""
+    drop = ("title", "summary", "has_summary")
+    return [{k: v for k, v in row.items() if k not in drop} for row in vote_rows]
+
+
 def display_name(stored: str) -> str:
     """FEC files names as "LEPAGE, PAUL"; readers expect "Paul Lepage"."""
     if "," not in stored:
@@ -105,6 +125,13 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         "finance": finance,
         "donors": donors,
         "promises": _rows(con, "SELECT * FROM promises"),
+        # Normalised: 21,711 promise-vote rows referenced only 244 distinct
+        # bills, so carrying each bill's title and summary inline repeated the
+        # same text about 89 times and cost 8MB of an otherwise 11MB page.
+        # The rows keep the per-vote facts (who voted how, when) and look the
+        # bill up by key.
+        "promise_votes": _thin_votes(_rows(con, "SELECT * FROM promise_votes")),
+        "bills": _bill_lookup(_rows(con, "SELECT * FROM promise_votes")),
         "evaluations": _rows(con, "SELECT * FROM evaluations"),
         "evidence": _rows(con, "SELECT * FROM evidence"),
         "record": record,
@@ -189,9 +216,18 @@ def build() -> Path:
     Promises have been researched in {researched} state so far, because that step means
     reading each candidate&rsquo;s own words rather than downloading a filing. This page
     shows which is which instead of leaving a district looking empty.
-    Snapshot built {built_on}: {counts['promises']} displayable promises and
-    {counts['evaluations']} alignment verdicts. Money comes from FEC filings; votes link
+    Snapshot built {built_on}: {counts['promises']} displayable promises, shown beside
+    {counts['promise_votes']} related roll-call votes. Money comes from FEC filings; votes link
     to the House Clerk. Identical treatment, identical method, every candidate.</p>
+    <p><strong>*We publish no alignment scores.</strong> We can find the votes related to a
+    promise, and those are shown. Judging whether a vote KEPT or BROKE a promise is a harder
+    problem than it looks: a bill titled the &ldquo;Homeowner Energy Freedom Act&rdquo; repeals
+    home energy efficiency rebates, so voting against it protects them. Our scoring got that
+    backwards, we found it in review, and we withdrew every score rather than publish work we
+    could not stand behind. The evidence on this page is unaffected: quotes are matched
+    character-for-character against their source, and votes come straight from the official
+    record. Anything marked with an asterisk is a gap in what we have gathered, stated so you
+    can weigh it, not a finding about a candidate.</p>
   </footer>
 </div>
 <script>window.__TALLY_GEO__ = {geo};

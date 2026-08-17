@@ -56,7 +56,16 @@ MAX_SNAPSHOT_BYTES = 150 * 1024 * 1024
 # was not clipped into a different meaning.
 CONTEXT_CHARS = 300
 
-SNAPSHOT_FORMAT_VERSION = 1
+# How much of a bill's summary travels beside a vote. The operative verbs are
+# at the front of a CRS summary (repeals, establishes, prohibits), and the
+# whole point of carrying it is that a title alone misleads.
+SUMMARY_CHARS = 400
+
+# Votes shown per promise. Enough to be representative, few enough that a
+# reader actually reads them rather than skimming a wall.
+VOTES_PER_PROMISE = 8
+
+SNAPSHOT_FORMAT_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -80,6 +89,12 @@ TABLES: tuple[TableSpec, ...] = (
               ("candidacy_id",)),
     TableSpec("promises", "export_promises", ("context_chars",),
               ("politician_id", "topic")),
+    # The votes beside a promise, carrying no verdict. This is what the app
+    # shows in place of a score: the same short list the evaluation stage
+    # would have been given, deep-linked, for the reader to judge.
+    TableSpec("promise_votes", "export_promise_votes",
+              ("summary_chars", "votes_per_promise"),
+              ("promise_id",)),
     TableSpec("evaluations", "export_evaluations", (),
               ("promise_id",)),
     TableSpec("evidence", "export_evidence", (),
@@ -176,7 +191,9 @@ def build(
         out_path.unlink()
 
     counts: dict[str, int] = {}
-    params = {"cycle": cycle, "context_chars": context_chars}
+    params = {"cycle": cycle, "context_chars": context_chars,
+              "summary_chars": SUMMARY_CHARS,
+              "votes_per_promise": VOTES_PER_PROMISE}
 
     own_connection = conn is None
     pg = conn if conn is not None else db.connect()

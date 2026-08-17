@@ -22,6 +22,9 @@ const financeFor = c => DATA.finance.find(f => f.candidacy_id===c.candidacy_id) 
 const promisesFor = c => byId(DATA.promises,'politician_id',c.politician_id);
 const evalFor = pid => DATA.evaluations.find(e => e.promise_id===pid);
 const receiptsFor = eid => byId(DATA.evidence,'evaluation_id',eid);
+const promiseVotesFor = pid => byId(DATA.promise_votes,'promise_id',pid);
+// Bill text lives once in DATA.bills, not once per promise-vote row.
+const billOf = v => (DATA.bills && DATA.bills[v.bill_key]) || {};
 const recordFor = c => (DATA.record||[]).find(r => r.politician_id===c.politician_id);
 const topicsFor = c => byId(DATA.topics||[],'politician_id',c.politician_id);
 const votesFor  = c => byId(DATA.votes||[],'politician_id',c.politician_id);
@@ -83,7 +86,7 @@ function renderRace(){
     const pacPct = raised ? Math.round(pac/raised*100) : 0;
     const donors = byId(DATA.donors,'candidacy_id',c.candidacy_id)
       .sort((a,b)=>a.donor_rank-b.donor_rank).slice(0,3);
-    const nEval = ps.filter(p => evalFor(p.promise_id)).length;
+    const nWithVotes = ps.filter(p => promiseVotesFor(p.promise_id).length).length;
     const meas = ps.filter(p => p.specificity==='measurable').length;
     return `<article class="card ${curCandidate===c.politician_id?'sel':''}">
       <div class="card-top">
@@ -108,7 +111,7 @@ function renderRace(){
         ${ps.length ? `<div class="tally-row">
             <span class="chip"><b>${ps.length}</b> total</span>
             <span class="chip"><b>${meas}</b> measurable</span>
-            <span class="chip"><b>${nEval}</b> checked against votes</span>
+            <span class="chip"><b>${nWithVotes}</b> with related votes</span>
           </div>
           <button class="view-btn" data-p="${c.politician_id}">
             ${curCandidate===c.politician_id?'Showing promises below':'Show promises &amp; record'}
@@ -128,16 +131,18 @@ function renderDetail(){
   if(!c){ host.innerHTML=''; return; }
   let ps = promisesFor(c);
   const topics = [...new Set(ps.map(p=>p.topic))].sort();
-  const checked = ps.filter(p=>evalFor(p.promise_id)).length;
+  const withVotes = ps.filter(p=>promiseVotesFor(p.promise_id).length).length;
   if(curFilter!=='all') ps = ps.filter(p=>p.topic===curFilter);
 
   host.innerHTML = `
     <div class="detail-head"><h2>${esc(c.display_name)}</h2></div>
     <p class="detail-note">Every quote below was matched character-for-character against its
-      source document before it was stored. ${checked>0
-        ? `${checked} of these have been checked against ${esc(c.display_name.split(' ').pop())}&rsquo;s roll-call record.`
-        : `None have been checked against a voting record &mdash; ${esc(c.display_name)} has not
-           served in Congress, so there are no votes to compare.`}</p>
+      source document before it was stored. ${withVotes>0
+        ? `${withVotes} of these are shown beside related roll-call votes. We do not score them:
+           read the votes and judge for yourself.`
+        : `*None of these have related votes to show. Either ${esc(c.display_name)} has not held
+           federal office, or we have not matched these subjects to roll calls in this Congress.
+           That is a gap in our coverage, not a finding about the candidate.`}</p>
     <div class="filters">
       <button class="filt" aria-pressed="${curFilter==='all'}" data-f="all">All ${promisesFor(c).length}</button>
       ${topics.map(t=>`<button class="filt" aria-pressed="${curFilter===t}" data-f="${esc(t)}">${esc(t.replace(/_/g,' '))}</button>`).join('')}
@@ -161,11 +166,39 @@ function renderPromise(p){
       <p class="ctx">&hellip;${esc(before)}<mark>${esc(p.verbatim_quote)}</mark>${esc(after)}&hellip;</p>
       <p class="src">Source: ${esc(p.document_title||p.doc_type||'document')}
         &middot; <a href="${esc(p.document_url)}" target="_blank" rel="noopener">view original</a></p>
-      ${ev ? renderVerdict(ev) : `<div class="empty" style="margin-top:16px">
-        <b>Not yet checked against a voting record.</b> An alignment verdict is published only
-        when it can cite specific roll-call votes. Nothing is shown here rather than a guess.</div>`}
+      ${ev ? renderVerdict(ev) : renderRelatedVotes(p)}
     </div>
   </article>`;
+}
+
+function renderRelatedVotes(p){
+  const vs = promiseVotesFor(p.promise_id);
+  if(!vs.length) return `<div class="empty" style="margin-top:16px">
+    <b>*We have no votes to show beside this promise.</b> Either this candidate has never held
+    federal office, or we have not matched this subject to any roll call in this Congress.
+    That is a gap in what we have gathered, not a finding about the candidate.</div>`;
+  const noSummary = vs.filter(v=>!billOf(v).has_summary).length;
+  return `<div class="related">
+    <h5 class="rel-h">How they voted on related bills &mdash; ${vs.length} roll call${vs.length===1?'':'s'}</h5>
+    <p class="rel-note">We do not score these. A bill&rsquo;s title is written to persuade and often
+      names the opposite of its effect, so read what the bill <b>does</b> before deciding what a
+      vote meant. Every row links to the official record.</p>
+    ${vs.map(v=>`<div class="rel">
+      <span class="pos pos-${esc((v.position||'').toLowerCase())}">${esc(v.position||'')}</span>
+      <span class="bill">
+        <b>${esc(v.bill_key||'')}</b> ${esc(billOf(v).title||'')}
+        ${v.is_omnibus?'<span class="omni" title="bundles many unrelated provisions">omnibus</span>':''}
+        ${v.is_procedural?'<span class="omni" title="a vote on process, not policy">procedural</span>':''}
+        ${billOf(v).has_summary
+          ? `<span class="what">${esc(billOf(v).summary||'')}</span>`
+          : `<span class="what what-missing">*Congress.gov published no summary for this bill.
+             The title alone may not describe what it does.</span>`}
+      </span>
+      <a href="${esc(v.congress_gov_url)}" target="_blank" rel="noopener">record</a>
+    </div>`).join('')}
+    ${noSummary ? `<p class="rel-foot">*${noSummary} of these ${noSummary===1?'bill has':'bills have'}
+      no published summary, so only the title is shown. Treat those with extra caution.</p>` : ''}
+  </div>`;
 }
 
 function renderVerdict(ev){
