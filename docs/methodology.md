@@ -176,6 +176,36 @@ them, which is why the snapshot date is displayed rather than a promise of
 freshness. This section will say "automated, weekly" when that is true and
 not before.
 
+## Finding your district, and what happens to your address
+
+The map shows city and town names so you can orient yourself. Those labels
+cannot tell you your district, and we are careful not to imply they can:
+congressional districts routinely split cities. Five points across Houston
+fall in five different districts, so a single label tied to one district would
+be wrong for most of the people living there.
+
+The address box is the reliable answer, and here is exactly what it does.
+
+- Your address goes from your browser **directly to the U.S. Census Bureau's
+  public geocoder**. It does not pass through us, we never receive it, and we
+  store nothing. There is no account, no cookie, and no log of it on our side.
+- The Census geocoder returns the congressional district for that address, and
+  the page then shows you that district. The lookup happens entirely between
+  your browser and a government service.
+- If the geocoder cannot match what you typed, the page says so rather than
+  guessing. We would rather answer nothing than answer wrongly about where
+  somebody lives.
+- Washington DC is a specific case worth stating: the geocoder answers with
+  its delegate district, but this site covers the 435 voting House seats, so
+  DC has no page here. The lookup says that instead of showing you an empty
+  one.
+
+The one technical caveat, stated because it is a real tradeoff: to work on a
+site with no server of its own, the lookup loads the Census reply as a script
+rather than a normal data request. That is a deliberate trust in a US
+government domain over HTTPS, and it is the only external service the page
+talks to.
+
 ## Coverage, and what is missing
 
 Coverage is uneven, and the app says so per candidate rather than leaving you

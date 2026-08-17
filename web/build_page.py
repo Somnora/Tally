@@ -217,6 +217,17 @@ def build() -> Path:
     <span class="hint">A dot marks a seat where promises have been researched.
       Everywhere else shows campaign finance only, so far.</span>
   </div>
+  <form class="finder" id="finder" role="search">
+    <label for="addr">Find your district</label>
+    <input id="addr" name="addr" type="text" autocomplete="street-address"
+           placeholder="Street address, city, state" aria-describedby="finderNote">
+    <button type="submit" id="findBtn">Look up</button>
+    <p class="finder-status" id="finderStatus" role="status" aria-live="polite"></p>
+    <p class="finder-note" id="finderNote">Your address is sent to the U.S. Census
+      Bureau geocoder, which returns the district. It is not sent to us, and we do
+      not store it. Cities are often split between districts, so an address is the
+      only reliable way to find yours.</p>
+  </form>
   <div class="tabs" id="tabs" role="tablist"></div>
   <div class="race-head" id="raceHead"></div>
   <div class="grid" id="grid"></div>

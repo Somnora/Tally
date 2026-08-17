@@ -331,3 +331,140 @@ document.addEventListener('click', e => {
   }
 });
 render();
+
+/* -- address to district ---------------------------------------------------
+ * The honest answer to "which district am I in". City labels orient a reader;
+ * they cannot answer this, because districts split cities: five points across
+ * Houston fall in five different districts. Only an address resolves it.
+ *
+ * WHY JSONP, WHICH IS OTHERWISE OBSOLETE. This is a static page on GitHub
+ * Pages with no server of its own, and the Census geocoder returns no
+ * Access-Control-Allow-Origin header, so a normal fetch is blocked by the
+ * browser before we ever see a response. JSONP predates CORS and sidesteps
+ * it: the reply arrives as a <script> whose body calls our callback.
+ *
+ * That means executing script from a remote origin, so the trust is
+ * deliberate and narrow. The URL is built here from a hardcoded https origin
+ * and never from anything a user typed beyond one encoded query parameter;
+ * the origin is a US government service; the tag is removed and the callback
+ * deleted whether it succeeds, fails or times out. We do not eval the
+ * response ourselves.
+ *
+ * PRIVACY. The address goes from the reader's browser straight to the Census
+ * Bureau. It never reaches us, we store nothing, and the form says so.
+ */
+
+const GEOCODER_ORIGIN = 'https://geocoding.geo.census.gov';
+const GEOCODER_PATH = '/geocoder/geographies/onelineaddress';
+const GEOCODER_TIMEOUT_MS = 15000;
+const CD_LAYER = '119th Congressional Districts';
+
+let geocodeSeq = 0;
+
+function lookupAddress(address){
+  return new Promise((resolve, reject) => {
+    const cb = `__tallyGeo${++geocodeSeq}`;
+    const script = document.createElement('script');
+    let timer = 0;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      delete window[cb];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    };
+
+    window[cb] = payload => { cleanup(); resolve(payload); };
+    script.onerror = () => { cleanup(); reject(new Error('network')); };
+    timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, GEOCODER_TIMEOUT_MS);
+
+    const params = new URLSearchParams({
+      address, benchmark: 'Public_AR_Current', vintage: 'Current_Current',
+      format: 'jsonp', callback: cb,
+    });
+    script.src = `${GEOCODER_ORIGIN}${GEOCODER_PATH}?${params.toString()}`;
+    document.head.appendChild(script);
+  });
+}
+
+/* Pull state + district out of the geocoder's reply, or null. Written to fail
+ * closed: an unexpected shape returns null and the caller says so, rather
+ * than guessing a district for someone's home address. */
+function districtFromGeocode(payload){
+  const matches = payload && payload.result && payload.result.addressMatches;
+  if(!Array.isArray(matches) || !matches.length) return null;
+  const match = matches[0];
+  const layer = match.geographies && match.geographies[CD_LAYER];
+  if(!Array.isArray(layer) || !layer.length) return null;
+  const fips = String(layer[0].STATE || '');
+  const cd = String(layer[0].CD119 || '');
+  const state = FIPS[fips];
+  if(!state || !cd) return null;
+  return { state, district: cd, matched: String(match.matchedAddress || '') };
+}
+
+function finderSay(text, kind){
+  const el = document.getElementById('finderStatus');
+  if(!el) return;
+  el.textContent = text;
+  el.className = `finder-status${kind ? ' ' + kind : ''}`;
+}
+
+async function runFinder(address){
+  const btn = document.getElementById('findBtn');
+  if(btn) btn.disabled = true;
+  finderSay('Looking up that address…');
+  try {
+    const found = districtFromGeocode(await lookupAddress(address));
+    if(!found){
+      finderSay('No match for that address. Try including the city and state, '
+              + 'or a ZIP code.', 'warn');
+      return;
+    }
+    const num = found.district === '00' ? 'at large'
+              : found.district === '98' ? 'delegate, at large'
+              : `district ${Number(found.district)}`;
+
+    // Navigating to a place this snapshot has no data for renders an empty
+    // shell and looks broken. DC is the live case: the geocoder answers with
+    // a delegate district, and this product covers the 435 VOTING seats, so
+    // DC is absent by design. Say that plainly and stay put.
+    if(!STATES.includes(found.state)){
+      finderSay(`${found.matched} is in ${found.state} ${num}. This site covers `
+        + `the 435 voting House seats, and ${found.state} is not one of them, so `
+        + `there is nothing to show for it.`, 'warn');
+      return;
+    }
+
+    const seat = `house|${found.district}`;
+    const known = seatsIn(found.state).some(([k]) => k === seat);
+    curState = found.state; curCandidate = null; curFilter = 'all';
+    mapLevel = 'state';
+    // Only select the seat if this snapshot actually carries it, rather than
+    // selecting a tab that does not exist.
+    curSeat = known ? seat : null;
+    render();
+    finderSay(known
+      ? `${found.matched} is in ${found.state} ${num}.`
+      : `${found.matched} is in ${found.state} ${num}, which this snapshot does `
+        + `not carry yet. Showing ${found.state}.`, known ? 'ok' : 'warn');
+    const head = document.getElementById('raceHead');
+    if(head) head.scrollIntoView({behavior:'smooth', block:'start'});
+  } catch (err) {
+    finderSay(err && err.message === 'timeout'
+      ? 'The Census geocoder did not answer in time. Try again in a moment.'
+      : 'Could not reach the Census geocoder. Check your connection and try again.',
+      'warn');
+  } finally {
+    if(btn) btn.disabled = false;
+  }
+}
+
+document.addEventListener('submit', e => {
+  const form = e.target.closest && e.target.closest('#finder');
+  if(!form) return;
+  e.preventDefault();
+  const input = document.getElementById('addr');
+  const address = (input && input.value || '').trim();
+  if(!address){ finderSay('Enter an address first.', 'warn'); return; }
+  runFinder(address);
+});
