@@ -76,6 +76,23 @@ torch.compile artifacts still land in `~/.cache/vllm`, which is ephemeral, so
 each fresh box pays ~2 min of compile. Moving `VLLM_CACHE_ROOT` to the NFS
 would remove that too; not done yet.
 
+### The trap in a persistent venv, if you ever write another one
+
+A venv symlinks `bin/python` at an interpreter that lives on the INSTANCE, so
+on a fresh box that symlink dangles even though the 8GB of packages beside it
+are perfectly good. The first version of the reuse check here tested whether
+the venv imported vllm, which is the right question, but it asked it BEFORE
+installing python3.12. The answer was therefore always no, the script deleted
+the venv and reinstalled, and it printed "skipping a 10-12 minute install"
+while doing the opposite. The optimisation would have paid off exactly never
+and looked like it was working.
+
+It surfaced on the second launch, because that is the first time the reuse
+path can run at all: build it on launch one, get the truth on launch two.
+Install the interpreter unconditionally first, then judge the venv. If you
+find yourself watching an 8GB rebuild on a box that should have skipped it,
+this is why, and it is not normal.
+
 ## Instance lifecycle (resolved)
 
 The two lost instances on the first night were NOT reaped by Manifold — its
