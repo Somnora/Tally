@@ -25,6 +25,7 @@ WEB = Path(__file__).resolve().parent
 SNAPSHOT = WEB.parent / "dist" / "tally.sqlite"
 MANIFEST = WEB.parent / "dist" / "tally.manifest.json"
 GEO = WEB.parent / "data" / "geo" / "us_cd119.topo.json"
+PLACES_GEO = WEB.parent / "data" / "geo" / "us_places.json"
 OUT = WEB / "index.html"
 
 # Money now covers every state; promises cover Maine. The page includes any
@@ -192,6 +193,10 @@ def build() -> Path:
         (WEB / "app.js").read_text(encoding="utf-8")
     data = json.dumps(payload, separators=(",", ":"), default=str)
     geo = GEO.read_text(encoding="utf-8").strip()
+    # Place labels ride beside the geometry rather than in the data payload:
+    # they are reference geography like the district shapes, not anything
+    # claimed about a candidate, and the map is their only consumer.
+    places = PLACES_GEO.read_text(encoding="utf-8").strip() if PLACES_GEO.exists() else "null"
 
     OUT.write_text(f"""<title>Follow the Money</title>
 <style>{css}</style>
@@ -246,6 +251,7 @@ def build() -> Path:
   </footer>
 </div>
 <script>window.__TALLY_GEO__ = {geo};
+window.__TALLY_PLACES__ = {places};
 window.__TALLY__ = {data};</script>
 <script>{script}</script>
 """, encoding="utf-8")

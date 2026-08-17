@@ -21,6 +21,47 @@
 
 const GEO = window.__TALLY_GEO__;
 
+/* -- place labels ---------------------------------------------------------
+ * Landmarks, not answers. District shapes follow equal population rather than
+ * anything a reader recognises, so a state of them is unreadable until a
+ * familiar town name anchors it. That is the whole job of this layer.
+ *
+ * It deliberately does NOT say which district a town is in. Five points across
+ * Houston fall in five different districts, so a label tied to one would be
+ * wrong for most of the city; the seat tabs and the district shapes answer
+ * that question, and an address lookup will answer it properly.
+ *
+ * Coordinates arrive already projected to Albers USA metres by
+ * pipeline/etl/places.py, using the same mapshaper projection that produced
+ * the district geometry, so they need only the same y-negation the arcs get.
+ */
+const PLACES = window.__TALLY_PLACES__ || { states: {} };
+
+// Tier 1 is drawn straight away, deeper tiers appear as the reader zooms. The
+// bands are chosen so the count on screen stays roughly constant: a state view
+// shows about a dozen, and zooming trades area for density rather than piling
+// every town onto the same frame.
+const PLACE_ZOOM_BANDS = [[2.5, 1], [6, 2], [15, 3]];
+const placeTierFor = k => (PLACE_ZOOM_BANDS.find(([limit]) => k < limit) || [0, 4])[1];
+
+// Counter-scale: the group is inside the zoom transform, so without dividing
+// by k the type balloons with the map. Same reasoning as non-scaling strokes.
+const PLACE_BASE_FONT = 9000;
+
+function placeLabels(stateCode, maxTier){
+  const bucket = PLACES.states[stateCode];
+  if(!bucket) return '';
+  let out = '';
+  for(let i = 0; i < bucket.n.length; i++){
+    if(bucket.t[i] > maxTier) continue;
+    // Negate y exactly as the arc decoder does: north-up projection into a
+    // y-down SVG. Getting this wrong mirrors every label about the equator.
+    out += `<text class="pl pl${bucket.t[i]}" x="${bucket.x[i]}" y="${-bucket.y[i]}">`
+         + `${esc(bucket.n[i])}</text>`;
+  }
+  return `<g class="places" aria-hidden="true">${out}</g>`;
+}
+
 const FIPS = {
   '01':'AL','02':'AK','04':'AZ','05':'AR','06':'CA','08':'CO','09':'CT','10':'DE',
   '11':'DC','12':'FL','13':'GA','15':'HI','16':'ID','17':'IL','18':'IN','19':'IA',
@@ -130,11 +171,25 @@ let mapWired = false;
 const viewTransform = () =>
   `translate(${mapView.tx} ${mapView.ty}) scale(${mapView.k})`;
 
+let placeTierShown = null;
+
 function applyView(){
   const svg = document.querySelector('#map svg.map');
   if(!svg) return;
   const g = svg.querySelector('g.mz');
   if(g) g.setAttribute('transform', viewTransform());
+  const places = svg.querySelector('g.places');
+  if(places){
+    // Font size every frame (one attribute, cheap); the label SET only when
+    // the tier band changes, because rebuilding hundreds of nodes on every
+    // wheel tick is what makes a map feel broken.
+    places.setAttribute('font-size', String(PLACE_BASE_FONT / mapView.k));
+    const tier = placeTierFor(mapView.k);
+    if(tier !== placeTierShown && curState){
+      placeTierShown = tier;
+      places.innerHTML = placeLabels(curState, tier).replace(/^<g[^>]*>|<\/g>$/g, '');
+    }
+  }
   const zoomed = mapView.k > 1.01;
   svg.classList.toggle('zoomed', zoomed);
   const reset = document.querySelector('#map [data-zoom="reset"]');
@@ -335,7 +390,8 @@ function renderMap(){
       data-seat="${key}" tabindex="0" role="button"
       aria-label="${curState} district ${num}"><title>${curState} ${num}</title></path>`;
   }).join('');
-  host.innerHTML = svgFrame(ds, inner, 'state-level') + `
+  placeTierShown = placeTierFor(mapView.k);
+  host.innerHTML = svgFrame(ds, inner + placeLabels(curState, placeTierShown), 'state-level') + `
     <div class="map-legend">
       <button class="map-back" data-back="1">&larr; All states</button>
       <span><i class="sw researched"></i>promises researched</span>

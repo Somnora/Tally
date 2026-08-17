@@ -283,3 +283,19 @@ svg.map.zoomed:active{cursor:grabbing}
 .pos-yea{color:var(--dir-s,#2f6f4f)}
 .pos-nay{color:var(--dir-c,#8a3324)}
 .rel-foot{font-size:12.5px;color:var(--warn);margin:10px 0 0;line-height:1.5}
+
+/* Place labels: landmarks for orientation, deliberately quiet.
+   They must never compete with the district shapes or read as data about a
+   candidate, so they sit below every interactive colour in contrast and take
+   no pointer events: a label must never swallow a click meant for a seat. */
+.places{fill:var(--muted);font-weight:500;pointer-events:none;
+  paint-order:stroke fill;stroke:var(--bg);stroke-width:3px;
+  stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.places text{text-anchor:middle;dominant-baseline:middle}
+/* The halo above is what keeps a name legible over a district fill without
+   darkening the map; tier 1 carries slightly more weight because at state
+   view it is doing the orienting on its own. */
+.pl1{font-weight:600;opacity:.95}
+.pl2{opacity:.85}
+.pl3{opacity:.75}
+.pl4{opacity:.65}

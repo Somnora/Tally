@@ -32,6 +32,21 @@ data/review/*
 # Built snapshots: regenerated from Postgres, never source.
 dist/
 
-# Boundary geometry is derived, not authored: rebuild with the mapshaper
-# command in web/map.js if the district lines change.
+# Map reference geometry is derived, not authored, but it is tracked because
+# the page cannot build without it and rebuilding needs tools (mapshaper) that
+# are not part of the Python toolchain.
+#
+# us_places.json is reproducible: uv run python -m pipeline.etl.places, which
+# records its source URLs and their sha256 inside the file it writes.
+#
+# us_cd119.topo.json is NOT currently reproducible from anything in this repo.
+# It is Census cb_2024 cd119 at 3% topology-preserving simplification,
+# projected to Albers USA by mapshaper, carrying both a districts and a states
+# layer. The exact invocation was never recorded, and this comment used to
+# claim the command lived in web/map.js, where only that prose description
+# has ever been. Verified empirically instead: the projection is mapshaper's
+# `albersusa`, because points projected with it land inside the correct
+# district polygons of this file, insets included. Recovering the full command
+# is worth doing before the lines next change.
 !data/geo/us_cd119.topo.json
+!data/geo/us_places.json
