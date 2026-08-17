@@ -13,7 +13,11 @@ set -euo pipefail
 
 MODEL="${TALLY_MODEL:-Qwen/Qwen3.5-27B-FP8}"
 NFS=/lambda/nfs/Somnora-East
-VENV="$HOME/tally-venv"
+# On the NFS, not in $HOME: $HOME dies with the instance, and installing vllm
+# costs 10-12 minutes of billed A100 time. We paid that three times in one
+# night. The share already holds the model cache, so the venv sits beside it
+# and a second launch goes straight to SERVE.
+VENV="$NFS/tally-venv"
 MIN_DRIVER=580   # CUDA 13 wheels need >= 580; Lambda images ship 570 (12.8)
 # Lambda's image defaults to python3.10, and two things need 3.12 here.
 # vllm hard-depends on flashinfer, whose fd_exchange.py annotates
@@ -29,24 +33,40 @@ driver_major() {
     nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d. -f1
 }
 
+# A persisted venv is only worth reusing if it actually imports. Testing for
+# the directory alone was safe when it lived in $HOME and was always fresh;
+# on the NFS it survives, so a half-finished install or one built against a
+# different Python would be silently trusted and then fail at serve time,
+# after the model spent ten minutes loading.
+venv_ok() {
+    [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c "import vllm" >/dev/null 2>&1
+}
+
 # Reassert cache ownership before ANY pip or vllm run: the sudo apt calls
 # below create ~/.cache as root, and both pip (silently, losing its cache)
 # and vllm (fatally, EACCES on ~/.cache/flashinfer) trip over it afterwards.
 sudo chown -R "$(id -un):$(id -gn)" "$HOME/.cache" 2>/dev/null || true
 
-if [ ! -d "$VENV" ] || [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
+if ! venv_ok || [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
     echo "== stage SETUP =="
-    if [ ! -d "$VENV" ]; then
+    if ! venv_ok; then
+        # python3.12 itself is per-instance even when the venv is not: the
+        # venv on the NFS references an interpreter that lives on the box.
         if ! command -v "$PYTHON" >/dev/null 2>&1; then
             sudo apt-get update -qq >/dev/null
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
                 python3.12 python3.12-venv python3.12-dev >/dev/null 2>&1
         fi
+        # A directory that exists but does not import is worse than none: it
+        # would defeat the check above on the next run too. Clear it out.
+        [ -d "$VENV" ] && echo "unusable venv at $VENV; rebuilding" && rm -rf "$VENV"
         # Fully isolated venv: system dist-packages carry a broken flatbuffers.
         "$PYTHON" -m venv "$VENV"
         source "$VENV/bin/activate"
         pip install -q --upgrade pip
         pip install -q vllm
+    else
+        echo "reusing the venv on $NFS (skipping a 10-12 minute install)"
     fi
     if [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
         sudo apt-get update -qq >/dev/null
