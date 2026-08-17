@@ -58,6 +58,28 @@ logger = logging.getLogger(__name__)
 PROMPT_VERSION = "evaluate_v3"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
+# Versions whose output was withdrawn and must not be produced again.
+#
+# v3 is here because it did not go far enough. It renders the summary and the
+# model reads it correctly, then inverts the vote anyway: it wrote that four
+# resolutions "would have nullified rules restricting coal leasing on federal
+# lands, thereby supporting increased fossil fuel development" and scored a
+# member's climate promise BROKEN for voting NAY on them. 483 citations in the
+# broken class follow that contradicts-plus-nay shape. It also scored promises
+# against votes on contested social questions the promise never raised, which
+# invariant 4 forbids outright.
+#
+# This is a mechanism rather than a note because withdrawing those rows made
+# every promise eligible for evaluation again: promises_for_evaluation skips a
+# promise only while a CURRENT evaluation exists for the model and prompt
+# version. So the quarantine that took them out of the product is exactly what
+# would let the next --all run regenerate them. Refusing at the point the
+# agent is built is the only place that cannot be forgotten.
+#
+# To move past this, write evaluate_v4 and set PROMPT_VERSION to it. Do not
+# remove v3 from this set to make a run go through.
+QUARANTINED_PROMPT_VERSIONS = frozenset({"evaluate_v3"})
+
 # How many votes reach the prompt. Enough to cover a topic, small enough that
 # the model reads all of them rather than skimming.
 MAX_VOTES = 25
@@ -92,6 +114,20 @@ def load_prompt(version: str) -> str:
 
 def build_agent(model: Model | None = None) -> Agent[None, EvaluationResult]:
     if model is None:
+        # The quarantine gates the PRODUCTION path only, which is the one that
+        # writes rows a snapshot can publish. Tests and the ablation harness
+        # inject a model and exercise the machinery without producing anything
+        # publishable, so blocking them would only tempt someone to empty the
+        # set to get a test suite green.
+        if PROMPT_VERSION in QUARANTINED_PROMPT_VERSIONS:
+            raise RuntimeError(
+                f"{PROMPT_VERSION} is quarantined and must not be run again: "
+                f"it inverts the direction of nay votes and scores promises "
+                f"against votes on questions they never raised. Its stored "
+                f"rows are withdrawn (is_current = FALSE) and kept for review. "
+                f"Write evaluate_v4 and point PROMPT_VERSION at it. See "
+                f"QUARANTINED_PROMPT_VERSIONS in this module."
+            )
         settings = get_settings()
         if not settings.vllm_base_url or not settings.local_model:
             raise RuntimeError(

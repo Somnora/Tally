@@ -18,6 +18,7 @@ from pipeline import db
 from pipeline.promise_gate import GATE_VERSION, screen_promise
 from pipeline.stages.evaluate_promises import (
     PROMPT_VERSION,
+    QUARANTINED_PROMPT_VERSIONS,
     EvidenceItem,
     build_agent,
     evaluate_promises,
@@ -133,6 +134,34 @@ def _exported(conn: db.Connection, promise_id: int) -> int:
 def test_only_the_substantive_vote_reaches_the_prompt(conn: db.Connection) -> None:
     politician_id, _ = _seed(conn)
     _substantive_vote_id(conn, politician_id)
+
+
+def test_a_quarantined_prompt_version_cannot_be_run_in_production() -> None:
+    """Withdrawing v3's rows is what makes this guard necessary.
+
+    promises_for_evaluation skips a promise only while a CURRENT evaluation
+    exists for this model and prompt version. Setting is_current = FALSE to
+    take the bad verdicts out of the product therefore made every promise
+    eligible again, so the very act of quarantining them is what would let the
+    next --all run regenerate them. The refusal has to live where the agent is
+    built, because that is the one place a run cannot skip.
+    """
+    assert PROMPT_VERSION in QUARANTINED_PROMPT_VERSIONS, (
+        "if PROMPT_VERSION has moved past the quarantined version, update this "
+        "test rather than deleting it: the next withdrawal will need it"
+    )
+    with pytest.raises(RuntimeError, match="quarantined"):
+        build_agent()
+
+
+def test_an_injected_model_still_runs_under_quarantine() -> None:
+    """The guard gates production, not the machinery. Blocking injected models
+    would only tempt someone to empty the set to get the suite green."""
+    agent = build_agent(TestModel(custom_output_args={
+        "status": "pending", "consistency_score": None,
+        "llm_reasoning": "none", "evidence": [],
+    }))
+    assert agent is not None
 
 
 def test_rendered_votes_carry_what_the_bill_does(conn: db.Connection) -> None:

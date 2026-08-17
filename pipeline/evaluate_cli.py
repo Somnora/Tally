@@ -23,6 +23,7 @@ from pipeline.stages import StageStats
 from pipeline.stages.evaluate_promises import (
     MAX_VOTES,
     PROMPT_VERSION,
+    QUARANTINED_PROMPT_VERSIONS,
     build_prompt,
     evaluate_promises,
 )
@@ -162,6 +163,17 @@ def main() -> None:
 
     settings = get_settings()
     model_name = settings.local_model or "unset"
+
+    # Fail here rather than letting every member fail one at a time. The guard
+    # in build_agent is the one that cannot be bypassed, but reaching it 269
+    # times prints 269 tracebacks and reads like a broken run instead of a
+    # deliberate refusal.
+    if PROMPT_VERSION in QUARANTINED_PROMPT_VERSIONS and not args.dry_run:
+        parser.error(
+            f"{PROMPT_VERSION} is quarantined: its verdicts invert the "
+            f"direction of nay votes. Its rows are withdrawn and kept for "
+            f"review. Write evaluate_v4 and point PROMPT_VERSION at it."
+        )
 
     if args.all:
         if args.dry_run:
