@@ -15,9 +15,11 @@ Run:  uv run python -m pipeline.evaluate_cli --politician "Chellie Pingree"
 import argparse
 import logging
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pipeline import db
 from pipeline.config import get_settings
+from pipeline.stages import StageStats
 from pipeline.stages.evaluate_promises import (
     MAX_VOTES,
     PROMPT_VERSION,
@@ -72,7 +74,7 @@ def run(politician_id: int, model_name: str) -> None:
         print(f"  {key:<34} {count}")
 
 
-def run_all(model_name: str) -> None:
+def run_all(model_name: str, workers: int) -> None:
     """Every member with work left, one connection and one transaction each.
 
     Per-member isolation is the same rule the ingestion workflows follow: a
@@ -95,23 +97,44 @@ def run_all(model_name: str) -> None:
               f"not eligible.\n      Run: uv run python -m pipeline.gate_cli --apply\n")
 
     total_pending = sum(pending for _, _, pending in members)
-    print(f"{len(members)} members with {total_pending} promises awaiting evaluation.\n")
+    print(f"{len(members)} members with {total_pending} promises awaiting evaluation, "
+          f"{workers} at a time.\n")
 
     totals: Counter[str] = Counter()
     failed: list[str] = []
-    for index, (politician_id, name, pending) in enumerate(members, start=1):
-        try:
-            with db.connect() as conn:
-                stats = evaluate_promises(conn, politician_id, model_name)
+    done = 0
+
+    def one_member(member: tuple[int, str, int]) -> tuple[str, int, StageStats]:
+        politician_id, name, pending = member
+        # A connection per member, opened inside the worker thread: psycopg
+        # connections are not for sharing across threads, and the per-member
+        # transaction boundary is what keeps one bad member from rolling back
+        # the others.
+        with db.connect() as conn:
+            return name, pending, evaluate_promises(conn, politician_id, model_name)
+
+    # Members run concurrently because the model server batches: vLLM is
+    # started with --max-num-seqs 8, and a sequential client leaves seven of
+    # those slots idle while it waits on the eighth. Threads rather than
+    # processes because every one of these is blocked on a socket.
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(one_member, m): m for m in members}
+        for future in as_completed(futures):
+            done += 1
+            member = futures[future]
+            try:
+                name, pending, stats = future.result()
+            except Exception:
+                failed.append(member[1])
+                logger.exception("%s failed; continuing", member[1])
+                continue
             totals.update(stats)
-            print(f"  {index:>3}/{len(members)} {name[:34]:<34} "
+            print(f"  {done:>3}/{len(members)} {name[:34]:<34} "
                   f"{pending:>3} promises  "
                   f"{stats.get('evaluations_validated', 0):>3} validated  "
                   f"{stats.get('evaluations_failed_validation', 0):>3} rejected  "
-                  f"{stats.get('no_related_votes', 0):>3} no votes")
-        except Exception:
-            failed.append(name)
-            logger.exception("%s failed; continuing", name)
+                  f"{stats.get('no_related_votes', 0):>3} no votes",
+                  flush=True)
 
     print("\nBatch complete.")
     for key in ("eligible", "evaluated", "no_related_votes",
@@ -130,6 +153,8 @@ def main() -> None:
     target.add_argument("--politician", help="full name as stored")
     target.add_argument("--all", action="store_true",
                         help="every member with promises still awaiting evaluation")
+    parser.add_argument("--workers", type=int, default=6,
+                        help="members evaluated concurrently (vllm serves 8 sequences)")
     parser.add_argument("--dry-run", action="store_true",
                         help="show the eligible promises and a sample prompt, call no model")
     args = parser.parse_args()
@@ -155,7 +180,7 @@ def main() -> None:
             return
         if not settings.vllm_base_url or not settings.local_model:
             parser.error("set VLLM_BASE_URL and LOCAL_MODEL in .env (start a GPU first)")
-        run_all(model_name)
+        run_all(model_name, args.workers)
         return
 
     with db.connect() as conn:

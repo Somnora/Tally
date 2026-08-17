@@ -32,7 +32,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from pipeline import db, evidence
@@ -41,7 +41,13 @@ from pipeline.stages import StageStats
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "evaluate_v1"
+# v2 is byte-identical to v1 as a prompt. The version moved because the
+# GENERATION CONFIG changed: thinking is now disabled (see build_agent), and
+# that changes what the model returns for the same text. Reproducibility is
+# the point of stamping a version on a stored evaluation, so a settings change
+# that moves outputs has to move the stamp too, or a v1 row becomes a claim
+# nobody can reproduce.
+PROMPT_VERSION = "evaluate_v2"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # How many votes reach the prompt. Enough to cover a topic, small enough that
@@ -95,7 +101,19 @@ def build_agent(model: Model | None = None) -> Agent[None, EvaluationResult]:
         model,
         output_type=EvaluationResult,
         system_prompt=load_prompt(PROMPT_VERSION),
-        model_settings={"temperature": 0.0},
+        # Qwen3.5 reasons before answering unless told not to, and on this task
+        # the reasoning is pure cost. Measured on the serving A100: thinking on
+        # burned the entire 2000 token budget in 53s and then FAILED schema
+        # validation often enough to exhaust pydantic-ai's output retries;
+        # thinking off answered the same prompt in 6s, cited both votes with
+        # the right positions and directions, and returned byte-identical
+        # output across runs. So this buys reliability and determinism, not
+        # just speed. It is passed through extra_body because it is a vLLM
+        # chat-template argument rather than an OpenAI API field.
+        model_settings=OpenAIChatModelSettings(
+            temperature=0.0,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        ),
     )
 
 
