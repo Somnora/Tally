@@ -99,7 +99,15 @@ def test_promise_dropped_by_the_gate_never_reaches_the_snapshot(
 def test_build_refuses_while_any_promise_is_unscreened(
     conn: db.Connection, tmp_path: Path
 ) -> None:
-    _seed(conn)  # leaves gate_keep NULL
+    _, promise_id = _seed(conn)
+    # State the precondition rather than inheriting it. _seed now screens its
+    # promise, because evaluation ignores anything the gate has not judged, so
+    # "unscreened" has to be created on purpose here or this test silently
+    # stops testing the refusal it exists for.
+    conn.execute(
+        "UPDATE promises SET gate_keep = NULL, gate_reason = NULL, "
+        "gate_version = NULL WHERE promise_id = %s", (promise_id,)
+    )
     with pytest.raises(RuntimeError, match="never been screened"):
         _snapshot(tmp_path, conn)
 

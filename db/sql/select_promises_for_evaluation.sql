@@ -14,12 +14,18 @@
 --                    promises DO pass, so this scales past the pilot.
 --   gate_keep        what actually does that job at national scale: human
 --                    review covers a few hundred promises, the selectivity
---                    gate covers all of them. Requiring TRUE rather than
---                    "not FALSE" means an unscreened promise waits for the
---                    gate instead of being scored ahead of it, which matches
---                    what app_export_promises already refuses to publish.
---                    Run pipeline.gate_cli --apply after any extraction; it
---                    needs no model and takes seconds.
+--                    gate covers all of them.
+--
+--                    This is STRICTER than app_export_promises, deliberately.
+--                    That view admits an unscreened promise (gate_keep IS NOT
+--                    FALSE) and the snapshot build is what refuses to ship
+--                    one. Here we require TRUE: evaluation costs GPU time and
+--                    writes rows, the gate costs seconds and no model, so an
+--                    unscreened promise should wait for the gate rather than
+--                    be scored ahead of it. Run pipeline.gate_cli --apply
+--                    after any extraction. Because that makes unscreened
+--                    promises invisible here, evaluate_cli counts them and
+--                    says so rather than reporting an empty queue.
 --   has a record     evaluation compares a promise to a voting record.
 --                    Challengers have none, so there is nothing to compare
 --                    and the stage skips them rather than emitting a wall of

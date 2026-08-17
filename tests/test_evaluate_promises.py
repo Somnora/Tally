@@ -15,6 +15,7 @@ import pytest
 from pydantic_ai.models.test import TestModel
 
 from pipeline import db
+from pipeline.promise_gate import GATE_VERSION, screen_promise
 from pipeline.stages.evaluate_promises import (
     PROMPT_VERSION,
     EvidenceItem,
@@ -24,6 +25,7 @@ from pipeline.stages.evaluate_promises import (
 )
 
 MODEL = "test-model"
+QUOTE = "I will vote against every gun safety rollback."
 
 
 def _seed(conn: db.Connection) -> tuple[int, int]:
@@ -65,12 +67,12 @@ def _seed(conn: db.Connection) -> tuple[int, int]:
     document_id = db.insert_document(
         conn, politician_id=politician_id, source_id=source_id,
         doc_type="campaign_site", title="Issues", url="https://example.test/issues",
-        published_at=None, full_text="I will vote against every gun safety rollback.",
+        published_at=None, full_text=QUOTE,
         content_hash="eval-doc", transcribed_by=None,
     )
     db.insert_verified_promise(
         conn, politician_id=politician_id, document_id=document_id,
-        verbatim_quote="I will vote against every gun safety rollback.",
+        verbatim_quote=QUOTE,
         char_start=0, char_end=45, topic="guns", specificity="directional",
         model_name=MODEL, prompt_version="extract_v2",
     )
@@ -79,7 +81,20 @@ def _seed(conn: db.Connection) -> tuple[int, int]:
     )
     row = cur.fetchone()
     assert row is not None
-    return politician_id, int(row[0])
+    promise_id = int(row[0])
+
+    # Evaluation only considers promises the selectivity gate kept, so the
+    # fixture has to carry a verdict or every test here evaluates nothing.
+    # Screen it with the real gate rather than forcing TRUE: that way a
+    # fixture quote the gate would actually reject fails here loudly instead
+    # of quietly testing a row production could never produce.
+    decision = screen_promise(QUOTE)
+    assert decision.keep, f"fixture quote is not gate-clean: {decision.reason}"
+    db.set_gate_verdict(
+        conn, promise_id=promise_id, keep=decision.keep,
+        reason=decision.reason, gate_version=GATE_VERSION,
+    )
+    return politician_id, promise_id
 
 
 def _run(conn: db.Connection, politician_id: int, output: dict[str, Any]) -> dict[str, int]:
