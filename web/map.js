@@ -338,6 +338,8 @@ function renderMap(){
   host.innerHTML = svgFrame(ds, inner, 'state-level') + `
     <div class="map-legend">
       <button class="map-back" data-back="1">&larr; All states</button>
+      <span><i class="sw researched"></i>promises researched</span>
+      <span><i class="sw funded"></i>finance only, no promises yet</span>
       ${ZOOM_CONTROLS}
       <span class="map-hint">${curState} &middot; ${ds.length} district${ds.length===1?'':'s'}
         &middot; scroll or pinch to zoom, drag to pan &middot; Senate seats are

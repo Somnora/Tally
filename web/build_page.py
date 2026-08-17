@@ -174,6 +174,17 @@ def build() -> Path:
     researched = len({
         r[state_at] for r in payload["candidates"]["rows"] if r[pol_at] in with_promises
     })
+    # District-level coverage, because that is what the map colours and what a
+    # reader actually asks about when a district renders pale.
+    seats = {}
+    off_at, dist_at = ci.index("office"), ci.index("district")
+    for r in payload["candidates"]["rows"]:
+        if r[off_at] != "house":
+            continue
+        key = (r[state_at], r[dist_at])
+        seats[key] = seats.get(key, False) or (r[pol_at] in with_promises)
+    seats_total = len(seats)
+    seats_covered = sum(1 for v in seats.values() if v)
     built_on = manifest["generated_at"][:10]
     css = (WEB / "app.css").read_text(encoding="utf-8")
     # map.js first: it defines renderMap, which app.js calls on every render.
@@ -213,9 +224,13 @@ def build() -> Path:
     Where the record cannot settle a question, this page says so instead of scoring it.</p>
     <p><strong>Where coverage stands.</strong> Campaign finance is loaded for all
     {states} states: {n_candidates} candidates with FEC filings across {counts['races']} races.
-    Promises have been researched in {researched} state so far, because that step means
-    reading each candidate&rsquo;s own words rather than downloading a filing. This page
-    shows which is which instead of leaving a district looking empty.
+    Promises have been read in {researched} states, covering {seats_covered} of the
+    {seats_total} House districts. *A pale district is one where we have not found
+    promises yet, not a district whose representative has made none. Reading promises
+    means fetching a member&rsquo;s own pages and extracting what they committed to,
+    and it fails in ordinary ways: some official sites publish no issues section at
+    all, and some bury it where our crawler did not follow. The map shows which is
+    which rather than leaving a district looking empty.
     Snapshot built {built_on}: {counts['promises']} displayable promises, shown beside
     {counts['promise_votes']} related roll-call votes. Money comes from FEC filings; votes link
     to the House Clerk. Identical treatment, identical method, every candidate.</p>
