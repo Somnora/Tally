@@ -27,10 +27,16 @@
 --
 -- An unknown topic matches the empty filter row and returns nothing, which
 -- the stage turns into 'unverifiable'. That is the honest answer.
+--
+-- The LEFT JOIN resolves an alias to the filter it points at, so the dozen
+-- ways a run can say "climate" all reach the environment filter without any
+-- of them holding a copy of it that can go stale.
 WITH filt AS (
-    SELECT policy_areas, subjects
-    FROM topic_vote_filters
-    WHERE topic = %(topic)s
+    SELECT coalesce(canon.policy_areas, t.policy_areas) AS policy_areas,
+           coalesce(canon.subjects,     t.subjects)     AS subjects
+    FROM topic_vote_filters t
+    LEFT JOIN topic_vote_filters canon ON canon.topic = t.canonical_topic
+    WHERE t.topic = %(topic)s
 ),
 matched AS (
     SELECT v.vote_id, v.congress, v.bill_key, v.position, v.vote_question,

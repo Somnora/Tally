@@ -10,6 +10,8 @@ let it.
 
 from typing import Any
 
+import psycopg
+import pytest
 from pydantic_ai.models.test import TestModel
 
 from pipeline import db
@@ -136,6 +138,31 @@ def test_unmatched_topic_yields_no_votes(conn: db.Connection) -> None:
     politician_id, _ = _seed(conn)
     assert db.votes_for_promise(conn, politician_id, "housing", 25) == []
     assert db.votes_for_promise(conn, politician_id, "other", 25) == []
+
+
+def test_alias_topic_resolves_to_the_filter_it_points_at(conn: db.Connection) -> None:
+    """An alias row stores no filter of its own, so if the resolving join is
+    ever dropped it degrades silently: the topic still exists, matches nothing,
+    and every promise under it records 'pending' as though the member had
+    simply never voted on it. Pin the two to the same result."""
+    politician_id, _ = _seed(conn)
+    # gun_violence -> guns is seeded by migration 0016, so this exercises the
+    # shipped mapping rather than one the test invented.
+    canonical = db.votes_for_promise(conn, politician_id, "guns", 25)
+    alias = db.votes_for_promise(conn, politician_id, "gun_violence", 25)
+    assert alias == canonical
+    assert alias, "the fixture must yield votes, or this proves nothing"
+
+
+def test_alias_row_cannot_also_carry_a_filter(conn: db.Connection) -> None:
+    """Half an alias is the drift the pointer exists to prevent."""
+    # Specifically the CHECK, not any error: a blind Exception here would also
+    # pass on a typo in the statement and prove nothing.
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute(
+            "INSERT INTO topic_vote_filters (topic, policy_areas, canonical_topic) "
+            "VALUES ('bogus', ARRAY['Health'], 'guns')"
+        )
 
 
 # -- the happy path -------------------------------------------------------------
