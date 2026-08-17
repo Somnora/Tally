@@ -796,6 +796,30 @@ def promises_for_evaluation(
     ]
 
 
+def members_for_evaluation(
+    conn: Connection, *, model_name: str, prompt_version: str
+) -> list[tuple[int, str, int]]:
+    """(politician_id, full_name, pending_count) for every member with work left."""
+    rows = conn.execute(
+        load_sql("select_members_for_evaluation"),
+        {"model_name": model_name, "prompt_version": prompt_version},
+    ).fetchall()
+    return [(int(r[0]), str(r[1]), int(r[2])) for r in rows]
+
+
+def count_unscreened_promises(conn: Connection) -> int:
+    """Verified promises the selectivity gate has not judged yet.
+
+    Evaluation requires gate_keep, so these are silently invisible to it.
+    The batch runner reports the number rather than letting a forgotten
+    gate run look like a corpus with nothing left to evaluate.
+    """
+    row = conn.execute(
+        "SELECT count(*) FROM promises WHERE quote_verified AND gate_keep IS NULL"
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
 def votes_for_promise(
     conn: Connection, politician_id: int, topic: str, limit: int = 25
 ) -> list[VoteContext]:

@@ -14,6 +14,7 @@ Run:  uv run python -m pipeline.evaluate_cli --politician "Chellie Pingree"
 
 import argparse
 import logging
+from collections import Counter
 
 from pipeline import db
 from pipeline.config import get_settings
@@ -23,6 +24,8 @@ from pipeline.stages.evaluate_promises import (
     build_prompt,
     evaluate_promises,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_dry(politician_id: int, model_name: str) -> None:
@@ -69,9 +72,64 @@ def run(politician_id: int, model_name: str) -> None:
         print(f"  {key:<34} {count}")
 
 
+def run_all(model_name: str) -> None:
+    """Every member with work left, one connection and one transaction each.
+
+    Per-member isolation is the same rule the ingestion workflows follow: a
+    run this long must not hold one transaction open, and a member the model
+    chokes on must not roll back the members already stored. A failure is
+    counted and logged, and that member is simply still pending on the next
+    run.
+    """
+    with db.connect() as conn:
+        members = db.members_for_evaluation(
+            conn, model_name=model_name, prompt_version=PROMPT_VERSION
+        )
+        unscreened = db.count_unscreened_promises(conn)
+
+    if unscreened:
+        # Evaluation requires gate_keep, so these are invisible to the query
+        # above. Saying so is the difference between "nothing left to do" and
+        # "the gate has not run since the last extraction".
+        print(f"NOTE: {unscreened} verified promises carry no gate verdict and are "
+              f"not eligible.\n      Run: uv run python -m pipeline.gate_cli --apply\n")
+
+    total_pending = sum(pending for _, _, pending in members)
+    print(f"{len(members)} members with {total_pending} promises awaiting evaluation.\n")
+
+    totals: Counter[str] = Counter()
+    failed: list[str] = []
+    for index, (politician_id, name, pending) in enumerate(members, start=1):
+        try:
+            with db.connect() as conn:
+                stats = evaluate_promises(conn, politician_id, model_name)
+            totals.update(stats)
+            print(f"  {index:>3}/{len(members)} {name[:34]:<34} "
+                  f"{pending:>3} promises  "
+                  f"{stats.get('evaluations_validated', 0):>3} validated  "
+                  f"{stats.get('evaluations_failed_validation', 0):>3} rejected  "
+                  f"{stats.get('no_related_votes', 0):>3} no votes")
+        except Exception:
+            failed.append(name)
+            logger.exception("%s failed; continuing", name)
+
+    print("\nBatch complete.")
+    for key in ("eligible", "evaluated", "no_related_votes",
+                "evaluations_validated", "evaluations_failed_validation",
+                "model_failures"):
+        print(f"  {key:<34} {totals.get(key, 0)}")
+    if failed:
+        print(f"\n  {len(failed)} members failed outright and remain pending:")
+        for name in failed:
+            print(f"    {name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate promises for one member")
-    parser.add_argument("--politician", required=True, help="full name as stored")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--politician", help="full name as stored")
+    target.add_argument("--all", action="store_true",
+                        help="every member with promises still awaiting evaluation")
     parser.add_argument("--dry-run", action="store_true",
                         help="show the eligible promises and a sample prompt, call no model")
     args = parser.parse_args()
@@ -79,6 +137,26 @@ def main() -> None:
 
     settings = get_settings()
     model_name = settings.local_model or "unset"
+
+    if args.all:
+        if args.dry_run:
+            with db.connect() as conn:
+                members = db.members_for_evaluation(
+                    conn, model_name=model_name, prompt_version=PROMPT_VERSION
+                )
+                unscreened = db.count_unscreened_promises(conn)
+            print(f"{len(members)} members, "
+                  f"{sum(p for _, _, p in members)} promises awaiting evaluation "
+                  f"({unscreened} unscreened and therefore not eligible).")
+            for politician_id, name, pending in members[:20]:
+                print(f"  {politician_id:>6}  {name[:40]:<40} {pending:>4}")
+            if len(members) > 20:
+                print(f"  ... and {len(members) - 20} more")
+            return
+        if not settings.vllm_base_url or not settings.local_model:
+            parser.error("set VLLM_BASE_URL and LOCAL_MODEL in .env (start a GPU first)")
+        run_all(model_name)
+        return
 
     with db.connect() as conn:
         politician_id = db.politician_id_by_name(conn, args.politician)

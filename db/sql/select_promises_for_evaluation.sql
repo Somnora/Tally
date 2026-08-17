@@ -12,6 +12,14 @@
 --                    without this gate two of every five evaluations would
 --                    scoring something that was never a promise. Unreviewed
 --                    promises DO pass, so this scales past the pilot.
+--   gate_keep        what actually does that job at national scale: human
+--                    review covers a few hundred promises, the selectivity
+--                    gate covers all of them. Requiring TRUE rather than
+--                    "not FALSE" means an unscreened promise waits for the
+--                    gate instead of being scored ahead of it, which matches
+--                    what app_export_promises already refuses to publish.
+--                    Run pipeline.gate_cli --apply after any extraction; it
+--                    needs no model and takes seconds.
 --   has a record     evaluation compares a promise to a voting record.
 --                    Challengers have none, so there is nothing to compare
 --                    and the stage skips them rather than emitting a wall of
@@ -28,6 +36,7 @@ JOIN politicians pol USING (politician_id)
 WHERE p.politician_id = %(politician_id)s
   AND p.quote_verified
   AND p.is_scoreable
+  AND p.gate_keep
   AND NOT EXISTS (
       SELECT 1 FROM promise_reviews r
       WHERE r.promise_id = p.promise_id

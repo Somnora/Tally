@@ -15,8 +15,16 @@ __pycache__/
 # Downloaded data (FEC bulk archives, legislators YAML, etc.)
 data/raw/
 
-# Review exchange files (promise exports / triage verdicts) — working files, not source
-data/review/
+# Review exchange files (promise exports / triage verdicts): working files.
+# The directory is excluded by contents rather than by name, because two
+# things in it are not working files. The gold set is the hand-labelled
+# evidence behind every precision number we publish, and the taxonomy is the
+# reasoning that produced the gate's rules. A quality claim nobody can
+# reproduce is a quality claim nobody should believe, and the methodology
+# page says these live in this repository, so they have to.
+data/review/*
+!data/review/gold_v2.jsonl
+!data/review/failure_taxonomy.md
 
 # Exported assistant session transcripts: working artifacts, never source.
 /20??-??-??-*.txt
