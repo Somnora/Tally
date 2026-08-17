@@ -47,16 +47,22 @@ venv_ok() {
 # and vllm (fatally, EACCES on ~/.cache/flashinfer) trip over it afterwards.
 sudo chown -R "$(id -un):$(id -gn)" "$HOME/.cache" 2>/dev/null || true
 
+# python3.12 is per-instance even though the venv is not, and it has to be
+# installed BEFORE the venv is judged. A venv on the NFS symlinks bin/python
+# at an interpreter that lives on the box, so on a fresh instance that symlink
+# dangles and venv_ok is false for a venv that is otherwise perfectly good.
+# Testing first and installing second would delete it and reinstall vllm, which
+# is the whole cost this was meant to avoid.
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    echo "installing $PYTHON (needed before the NFS venv can be judged)"
+    sudo apt-get update -qq >/dev/null
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        python3.12 python3.12-venv python3.12-dev >/dev/null 2>&1
+fi
+
 if ! venv_ok || [ "$(driver_major)" -lt "$MIN_DRIVER" ]; then
     echo "== stage SETUP =="
     if ! venv_ok; then
-        # python3.12 itself is per-instance even when the venv is not: the
-        # venv on the NFS references an interpreter that lives on the box.
-        if ! command -v "$PYTHON" >/dev/null 2>&1; then
-            sudo apt-get update -qq >/dev/null
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-                python3.12 python3.12-venv python3.12-dev >/dev/null 2>&1
-        fi
         # A directory that exists but does not import is worse than none: it
         # would defeat the check above on the next run too. Clear it out.
         [ -d "$VENV" ] && echo "unusable venv at $VENV; rebuilding" && rm -rf "$VENV"
