@@ -316,6 +316,50 @@ def test_empty_quote_is_dropped() -> None:
     assert _drop_reason("   ") == "fragment"
 
 
+# -- pattern 10: bullets lifted out of an official-site priority list ----------
+# Official congressional sites supply 93% of extracted promises and are built
+# out of bulleted lists. The extractor lifts a bullet away from the heading
+# that carried the commitment, leaving a phrase that names a topic and commits
+# nobody to anything.
+
+def test_headless_gerund_bullet_is_dropped() -> None:
+    assert _drop_reason("reforming the tax code to rebuild the middle class") == "fragment"
+    assert _drop_reason("expanding worker protections and their right to organize") == "fragment"
+    assert _drop_reason("opening up new markets for U.S. exports") == "fragment"
+
+
+def test_measurable_bullet_without_a_clause_is_still_dropped() -> None:
+    # Specific and numeric, but nobody in it has agreed to do anything. The
+    # figures make it tempting; the missing actor is what disqualifies it.
+    assert _drop_reason(
+        "Raising the credit to $5,000 (currently $2,000) to help alleviate the high "
+        "costs facing parents."
+    ) == "fragment"
+
+
+def test_gerund_subject_with_a_finite_verb_is_kept() -> None:
+    # The distinction the rule exists to draw: a gerund SUBJECT heads a real
+    # proposition, so these are complete sentences, not bullets.
+    _assert_kept("Promoting transparency and real competition is crucial to help lower costs.")
+    _assert_kept(
+        "growing an economy that works for everyone means making strategic investments "
+        "in education, research, and infrastructure"
+    )
+
+
+def test_gerund_opener_before_a_real_clause_is_kept() -> None:
+    _assert_kept(
+        "Moving forward, we also need to boost our nation's investments in medical "
+        "research at the National Institutes of Health."
+    )
+
+
+def test_ing_word_that_is_not_a_gerund_does_not_trip_the_rule() -> None:
+    # "Bring" and "Nothing" end in -ing without being gerunds; neither opens a
+    # list bullet, and the rule must not read them as one.
+    _assert_kept("Bring our troops home from the Middle East and end the forever wars.")
+
+
 # -- mechanics -----------------------------------------------------------------
 
 def test_disabled_rule_is_skipped() -> None:

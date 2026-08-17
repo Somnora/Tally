@@ -22,8 +22,11 @@ Decision ladder, first rule that fires wins:
 
   Structural rules (never escapable, the quote is disqualified as an object):
     1. fragment             not a complete proposition: too short to carry
-                            one, ends mid-word, or is prose cut off before
-                            its sentence ended.
+                            one, ends mid-word, is prose cut off before its
+                            sentence ended, or is a headless gerund phrase
+                            lifted out of a bulleted list ("reforming the tax
+                            code to rebuild the middle class") where the
+                            heading, not the bullet, carried the commitment.
     2. reported_speech      a broadcast caption or reporter summary ABOUT a
                             candidate ("RUSSELL SAYS HE'LL SUPPORT ..."),
                             not the candidate speaking.
@@ -81,7 +84,10 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Literal
 
-GATE_VERSION = "gate_v1"
+# v2 added the headless-gerund case to rule 1. The stamp has to move with the
+# rules: two different rulesets both claiming "gate_v1" would make a stored
+# verdict impossible to reproduce from the version that names it.
+GATE_VERSION = "gate_v2"
 
 # Below this a span cannot carry a whole proposition ("we'll we'll fight
 # back"). Deliberately shorter than any plausible complete promise: the
@@ -178,11 +184,55 @@ _TERMINAL_PUNCTUATION = (".", "!", "?", '"', "”", "'", "’", ":", ";")
 _ENDS_MID_WORD = re.compile(r"(?:^|\s)[b-hj-z]\s*$", re.IGNORECASE)  # a lone letter, not "a"/"I"
 _INTERNAL_SENTENCE_END = re.compile(r"[.!?][\"'”’)]?\s+\S")
 
+# An -ing word opening the span. Official-site issue pages are built out of
+# bulleted priority lists ("My plan will: Doubling the child tax credit, ...")
+# and the extractor lifts the bullets out from under the heading that supplied
+# the commitment, leaving a headless phrase behind.
+_GERUND_HEAD = re.compile(r"^(?:and\s+|by\s+)?(\w+ing)\b", re.IGNORECASE)
+# -ing words that open a sentence without being a gerund, so the head test
+# does not misread an ordinary sentence as a list bullet.
+_NOT_GERUNDS = frozenset(
+    {"bring", "thing", "nothing", "something", "everything", "anything", "king",
+     "ring", "sing", "spring", "string", "wing", "during", "ceiling", "willing",
+     "morning", "evening", "sibling"}
+)
+# Any finite verb: its presence means the span has a real clause, whatever it
+# starts with. Deliberately generous, because the fail-open bias means a miss
+# here costs a leaked bullet while a false hit costs a real promise.
+_FINITE_VERB = re.compile(
+    r"\b(?:will|would|shall|must|should|can|could|may|might"
+    r"|is|are|am|was|were|has|have|had|does|do|did"
+    # "costs", "needs" and "matters" are left out on purpose: in this genre
+    # they are far more often nouns ("the high costs facing parents", "the
+    # needs of veterans") than verbs, and admitting them would let a bullet
+    # keep itself by naming one. Bare "need" stays, for "we need to".
+    r"|means|need|remains|deserves|requires|includes|continues"
+    r"|allows|provides|ensures|helps|makes|gives|takes|works|belongs)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_headless_gerund(quote: str) -> bool:
+    """A bullet lifted out of the list whose heading carried the commitment.
+
+    "reforming the tax code to rebuild the middle class" states a topic, not a
+    proposition: nobody in it has agreed to do anything. A gerund SUBJECT is a
+    different thing and stays ("Promoting transparency ... is crucial",
+    "growing an economy ... means making investments"), which is why this asks
+    for a finite verb anywhere rather than parsing the phrase.
+    """
+    head = _GERUND_HEAD.match(quote)
+    if not head or head.group(1).lower() in _NOT_GERUNDS:
+        return False
+    return not _FINITE_VERB.search(quote)
+
 
 def _is_fragment(quote: str) -> bool:
     if len(quote) < MIN_QUOTE_CHARS:
         return True
     if _ENDS_MID_WORD.search(quote):
+        return True
+    if _is_headless_gerund(quote):
         return True
     # Prose that already ended one sentence but stops mid-way through the
     # next one was cut off ("...which essentially transform semi-autom").

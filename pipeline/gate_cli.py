@@ -6,6 +6,11 @@ result sat in a module nothing called. This is what connects it to the
 product: it screens every verified promise and writes the verdict onto the
 row, so app_export_promises can refuse the ones that were never promises.
 
+Read that 92% narrowly. The gold set is 118 rows, all from transcripts, and
+official congressional sites now supply the overwhelming majority of stored
+promises. The genre carrying the most weight in the product is the one the
+precision figure says least about.
+
 Nothing is destroyed. The gate's opinion lives in three columns beside the
 promise; the quote, offsets, topic and specificity are untouched, and a
 promise the gate drops is still in the database, still reviewable, still

@@ -87,8 +87,12 @@ def test_baseline_reproduces_the_measured_v2_precision() -> None:
 
 
 def test_gate_headline_numbers_are_pinned() -> None:
-    """The numbers reported for gate_v1. In-sample, and locked so a regex
-    change cannot move them silently."""
+    """The headline numbers, locked so a regex change cannot move them
+    silently. In-sample, and measured on a gold set built entirely from
+    transcripts: gate_v2's headless-gerund rule leaves them untouched because
+    no bulleted issue page is represented here. That is a gap in the gold set,
+    not evidence the rule is inert.
+    """
     s = score(load_gold(GOLD_PATH), gate_procedure(), "gate")
     assert s.leaks_caught == 41
     assert s.collateral_damage == 1
