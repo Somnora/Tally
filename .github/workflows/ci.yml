@@ -1,0 +1,74 @@
+name: CI
+
+# The suite is mostly database tests, and conftest skips those when Postgres
+# is unreachable rather than failing. That is right on a laptop and wrong
+# here, so CI is exported: conftest raises instead of skipping when it is set,
+# and a runner without a database fails loudly instead of reporting a green
+# check over a few dozen pure-logic tests.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        # Without this the steps below can start before Postgres accepts
+        # connections, which would surface as a confusing test failure
+        # rather than as "the database was not up yet".
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CI: "true"
+      # conftest connects to postgresql://localhost/postgres with no
+      # credentials in the URL, so libpq picks these up from the environment.
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Lint
+        run: uv run ruff check pipeline/ tests/ export/ web/
+
+      - name: Typecheck
+        run: uv run pyright
+
+      - name: Test
+        # -rs lists anything skipped, so a test quietly opting out of CI is
+        # visible in the log rather than hidden in a pass.
+        run: uv run pytest -rs
