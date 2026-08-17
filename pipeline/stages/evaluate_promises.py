@@ -41,13 +41,21 @@ from pipeline.stages import StageStats
 
 logger = logging.getLogger(__name__)
 
-# v2 is byte-identical to v1 as a prompt. The version moved because the
-# GENERATION CONFIG changed: thinking is now disabled (see build_agent), and
-# that changes what the model returns for the same text. Reproducibility is
-# the point of stamping a version on a stored evaluation, so a settings change
-# that moves outputs has to move the stamp too, or a v1 row becomes a claim
-# nobody can reproduce.
-PROMPT_VERSION = "evaluate_v2"
+# v2 was byte-identical to v1 as a prompt; the version moved because the
+# GENERATION CONFIG changed (thinking disabled, see build_agent) and that
+# changes what the model returns for the same text.
+#
+# v3 fixes a wrong-answer bug rather than a speed one. The vote list showed
+# only a bill's title, and titles are written to persuade: "Homeowner Energy
+# Freedom Act" repeals home energy efficiency rebates, so the model read a
+# vote protecting those rebates as a vote against them and published a broken
+# promise against the member who kept it. v3 renders the summary and tells the
+# model the summary governs. Every v2 row was unpublished on that basis.
+#
+# Reproducibility is the point of stamping a version on a stored evaluation:
+# anything that changes the answer has to move the stamp, or a stored row
+# becomes a claim nobody can reproduce.
+PROMPT_VERSION = "evaluate_v3"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # How many votes reach the prompt. Enough to cover a topic, small enough that
@@ -117,12 +125,29 @@ def build_agent(model: Model | None = None) -> Agent[None, EvaluationResult]:
     )
 
 
+# How much of a bill summary reaches the prompt. See render_votes.
+SUMMARY_CHARS = 400
+
+
 def render_votes(votes: list[db.VoteContext]) -> str:
     """The vote list as the model sees it. One line per vote, id first.
 
     OMNIBUS and PROCEDURAL are stated inline rather than left implicit,
     because the prompt restricts both to contextual citations and the model
     cannot apply that rule to a fact it was not told.
+
+    The SUMMARY is here because leaving it out produced backwards verdicts.
+    A congressional bill title is written to persuade, and routinely names
+    the opposite of its effect: HR-4758, the "Homeowner Energy Freedom Act",
+    REPEALS home energy efficiency rebates. Shown only that title, the model
+    read a nay vote as opposing home energy efficiency and published a broken
+    promise against a member who had in fact voted to protect the credits he
+    promised to protect. The summary was in the query and in VoteContext the
+    whole time; only this renderer dropped it.
+
+    Truncated rather than passed whole: 25 votes of unbounded summary would
+    crowd out the promise itself, and the first sentences of a CRS summary
+    carry the operative verbs (repeals, establishes, prohibits).
     """
     lines: list[str] = []
     for vote in votes:
@@ -131,13 +156,23 @@ def render_votes(votes: list[db.VoteContext]) -> str:
             flags += " [OMNIBUS: bundles many unrelated provisions]"
         if vote.is_procedural:
             flags += " [PROCEDURAL: a vote on process, not policy]"
+        summary = (vote.summary_text or "").strip()
+        if len(summary) > SUMMARY_CHARS:
+            summary = summary[:SUMMARY_CHARS].rsplit(" ", 1)[0] + "..."
+        # Say so explicitly when there is no summary. Silence would let the
+        # model treat a title-only entry exactly like a summarised one, which
+        # is the failure this whole block exists to prevent.
+        detail = f"    WHAT IT DOES: {summary}" if summary else (
+            "    WHAT IT DOES: (no summary available; judge the title with caution)"
+        )
         # Positions render lowercase so the text the model copies is exactly
         # the token the output schema accepts. Showing "NAY" and requiring
         # "nay" costs a validation retry on every single citation.
         lines.append(
             f"[vote_id: {vote.vote_id}] {vote.bill_key} | voted {vote.position}"
             f" on '{vote.vote_question}' | {vote.voted_at}{flags}\n"
-            f"    {vote.title or '(untitled)'}"
+            f"    TITLE: {vote.title or '(untitled)'}\n"
+            f"{detail}"
         )
     return "\n".join(lines)
 

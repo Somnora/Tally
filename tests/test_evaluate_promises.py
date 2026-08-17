@@ -135,6 +135,32 @@ def test_only_the_substantive_vote_reaches_the_prompt(conn: db.Connection) -> No
     _substantive_vote_id(conn, politician_id)
 
 
+def test_rendered_votes_carry_what_the_bill_does(conn: db.Connection) -> None:
+    """The bug this pins cost us real published verdicts.
+
+    render_votes showed only a bill's TITLE. Congressional titles are written
+    to persuade and often name the opposite of the effect: HR-4758, the
+    "Homeowner Energy Freedom Act", repeals home energy efficiency rebates. A
+    member who voted nay PROTECTED those rebates, and we published that he had
+    broken a promise to protect them. The summary was in the SQL and on
+    VoteContext throughout; only the renderer dropped it, which is precisely
+    the kind of omission no other test could see.
+    """
+    politician_id, _ = _seed(conn)
+    rendered = render_votes(db.votes_for_promise(conn, politician_id, "guns", 25))
+    assert "A bill about firearms." in rendered, "the summary must reach the model"
+    assert "WHAT IT DOES" in rendered
+
+
+def test_a_vote_with_no_summary_says_so(conn: db.Connection) -> None:
+    """Silence would let the model treat a title-only entry as a summarised
+    one and infer the effect from the title, which is the original bug."""
+    politician_id, _ = _seed(conn)
+    conn.execute("UPDATE bills SET summary_text = NULL WHERE bill_key = 'HR-1181'")
+    rendered = render_votes(db.votes_for_promise(conn, politician_id, "guns", 25))
+    assert "no summary available" in rendered
+
+
 def test_rendered_position_matches_the_token_the_schema_accepts(
     conn: db.Connection,
 ) -> None:
