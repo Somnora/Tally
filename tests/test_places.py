@@ -6,7 +6,17 @@ mis-stripped name shows a reader "Houston city" forever, and a tiering bug
 either buries a state's largest towns or buries the map in labels.
 """
 
-from pipeline.etl.places import Place, assign_tiers, display_name, load_population
+import math
+
+from pipeline.etl.places import (
+    SNAP_MAX_METRES,
+    SNAP_MIN_METRES,
+    SNAP_SPAN_MULTIPLE,
+    Place,
+    assign_tiers,
+    display_name,
+    load_population,
+)
 
 
 def test_type_suffixes_are_stripped() -> None:
@@ -106,3 +116,25 @@ def test_land_area_breaks_ties_so_ordering_is_never_alphabetical() -> None:
     ]
     assign_tiers(places, {})
     assert places[1].rank == 1, "largest by area ranks first, not the alphabet"
+
+
+def test_snap_budget_scales_with_the_size_of_the_place() -> None:
+    """A label may be moved about as far as the place itself is wide.
+
+    San Francisco's interior point sits 31km out to sea because the city
+    limits reach the Farallon Islands, and it earns that move onto its own
+    peninsula. Duck Key spans a few hundred metres, so the same move would
+    put it on somebody else's island. One fixed threshold cannot serve both,
+    which is why the budget is derived from land area.
+    """
+    def budget(aland: int) -> float:
+        return min(SNAP_MAX_METRES,
+                   max(SNAP_MIN_METRES, math.sqrt(aland) * SNAP_SPAN_MULTIPLE))
+
+    san_francisco = 121_000_000   # m2, ~11km across
+    duck_key = 500_000            # m2, a few hundred metres across
+    assert budget(san_francisco) > 31_000, "SF must be allowed its real move"
+    assert budget(duck_key) < 5_000, "a small key must not reach another island"
+    # Bounded at both ends: never strand a hamlet, never teleport a metropolis.
+    assert budget(0) == SNAP_MIN_METRES
+    assert budget(10**12) == SNAP_MAX_METRES
