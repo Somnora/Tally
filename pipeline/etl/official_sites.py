@@ -188,7 +188,8 @@ def main() -> None:
 
     if args.dry_run:
         print(f"{len(members)} members would be harvested "
-              f"(~{len(members) * 7} page fetches, ~{len(members) * 7 * 1.5 / 60:.0f} minutes)")
+              f"(up to ~{len(members) * 20} page fetches, "
+              f"~{len(members) * 20 * 1.5 / 60:.0f} minutes worst case)")
         for member in members[:10]:
             print(f"  {member.name[:34]:<34} {member.url}")
         if len(members) > 10:
