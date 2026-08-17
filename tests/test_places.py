@@ -78,17 +78,31 @@ def test_places_with_no_population_sink_to_the_deepest_tier() -> None:
     assert all(p.tier == 4 for p in places if p.rank > 150)
 
 
-def test_population_takes_the_maximum_across_place_parts() -> None:
-    """A place split across county lines appears once per part; summing would
-    double count and taking the first would undercount."""
-    csv_text = (
-        "SUMLEV,STATE,COUNTY,PLACE,COUSUB,CONCIT,PRIMGEO_FLAG,FUNCSTAT,NAME,"
-        "STNAME,ESTIMATESBASE2020,POPESTIMATE2024\n"
-        "162,48,000,35000,00000,00000,0,A,Houston city,Texas,2300000,2300000\n"
-        "157,48,201,35000,00000,00000,0,A,Houston city (part),Texas,2000000,2000000\n"
-        "040,48,000,00000,00000,00000,0,A,Texas,Texas,29000000,31000000\n"
+def test_population_reads_place_rows_and_ignores_other_geographies() -> None:
+    """The ACS file carries every geography level in one stream. Only place
+    rows (1600000US) are population for a place; a state row leaking in would
+    hand one town its whole state's population and pin it to tier 1."""
+    data = (
+        "GEO_ID|B01003_E001|B01003_M001\n"
+        "1600000US4835000|2300000|500\n"       # Houston
+        "0400000US48|31000000|0\n"             # Texas, a state
+        "1600000US1571550|344967|900\n"        # Urban Honolulu, a CDP
+        "1600000US0100124|-555555555|0\n"      # suppressed cell
     )
-    pops = load_population(csv_text.encode("utf-8"))
+    pops = load_population(data.encode("utf-8"))
     assert pops["4835000"] == 2_300_000
-    # the state-level row is not a place and must not leak in
-    assert "4800000" not in pops
+    assert pops["1571550"] == 344_967, "CDPs must carry population, unlike PEP"
+    assert "48" not in pops
+    assert "0100124" not in pops, "suppressed negatives are not populations"
+
+
+def test_land_area_breaks_ties_so_ordering_is_never_alphabetical() -> None:
+    """The Hawaii failure: every place there is a CDP, the old source gave
+    them all 0, and the sort fell through to file order, which is
+    alphabetical. Tier 1 read Ahuimanu, Aiea, Ainaloa."""
+    places = [
+        Place(geoid=f"15{i:05d}", state="HI", name=n, lat=21.0, lon=-157.0, aland=area)
+        for i, (n, area) in enumerate([("Ahuimanu", 10), ("Zzz Big", 9_000), ("Aiea", 20)])
+    ]
+    assign_tiers(places, {})
+    assert places[1].rank == 1, "largest by area ranks first, not the alphabet"

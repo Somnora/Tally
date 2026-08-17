@@ -44,9 +44,14 @@ const PLACES = window.__TALLY_PLACES__ || { states: {} };
 const PLACE_ZOOM_BANDS = [[2.5, 1], [6, 2], [15, 3]];
 const placeTierFor = k => (PLACE_ZOOM_BANDS.find(([limit]) => k < limit) || [0, 4])[1];
 
-// Counter-scale: the group is inside the zoom transform, so without dividing
-// by k the type balloons with the map. Same reasoning as non-scaling strokes.
-const PLACE_BASE_FONT = 9000;
+// Label size is a FRACTION OF THE CURRENT FRAME, not a fixed number of map
+// units, because a map unit is a metre and the frames differ by orders of
+// magnitude: at a fixed 9000 the same rule rendered Texas at 6px, unreadable,
+// and DC at 418px, absurd. Expressing it relative to the fitted viewBox makes
+// a label the same apparent size in every state. Dividing by k on top is the
+// counter-scale, the same reasoning as non-scaling strokes.
+const PLACE_FONT_FRACTION = 0.0125;
+const placeFontFor = k => (mapBase[2] * PLACE_FONT_FRACTION) / k;
 
 function placeLabels(stateCode, maxTier){
   const bucket = PLACES.states[stateCode];
@@ -183,7 +188,7 @@ function applyView(){
     // Font size every frame (one attribute, cheap); the label SET only when
     // the tier band changes, because rebuilding hundreds of nodes on every
     // wheel tick is what makes a map feel broken.
-    places.setAttribute('font-size', String(PLACE_BASE_FONT / mapView.k));
+    places.setAttribute('font-size', String(placeFontFor(mapView.k)));
     const tier = placeTierFor(mapView.k);
     if(tier !== placeTierShown && curState){
       placeTierShown = tier;

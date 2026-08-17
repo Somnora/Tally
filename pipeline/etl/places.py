@@ -64,18 +64,21 @@ GAZETTEER_URL = (
     "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/"
     "2024_Gazetteer/2024_Gaz_place_national.zip"
 )
+# ACS rather than the Population Estimates programme, which was the first
+# choice and was wrong. PEP covers incorporated places and essentially no
+# Census Designated Places, so in Hawaii, where nearly every place is a CDP,
+# every population came back 0, the sort fell through to input order, and the
+# state's top tier rendered alphabetically: Ahuimanu, Aiea, Ainaloa, with
+# Honolulu and Hilo buried. ACS covers 99.8% of the Gazetteer.
 POPULATION_URL = (
-    "https://www2.census.gov/programs-surveys/popest/datasets/"
-    "2020-2024/cities/totals/sub-est2024.csv"
+    "https://www2.census.gov/programs-surveys/acs/summary_file/2023/"
+    "table-based-SF/data/5YRData/acsdt5y2023-b01003.dat"
 )
+# ACS keys places as 1600000US<GEOID>; the Gazetteer carries the bare GEOID.
+ACS_PLACE_PREFIX = "1600000US"
 OUT_PATH = Path("data/geo/us_places.json")
 
 USER_AGENT = "tally-civic-transparency/0.1 (nonpartisan transparency project; local ingestion)"
-
-# Summary levels in the population file that describe a PLACE. 162 is an
-# incorporated place; the others are place-parts split across county or
-# functional lines, whose maximum is the place total.
-PLACE_SUMMARY_LEVELS = {"162", "157", "170", "171"}
 
 # Census writes the legal type into NAME ("Houston city", "Abanda CDP"). The
 # suffix is lower case for every type except CDP, which is what makes stripping
@@ -118,6 +121,7 @@ class Place:
     lat: float
     lon: float
     pop: int = 0
+    aland: int = 0
     rank: int = 0
     tier: int = 4
     xy: tuple[float, float] | None = field(default=None)
@@ -130,22 +134,25 @@ def fetch(url: str) -> bytes:
 
 
 def load_population(raw: bytes) -> dict[str, int]:
-    """GEOID -> population. Place-parts collapse to their maximum."""
-    text = raw.decode("latin-1")
+    """GEOID -> population, from the ACS table-based summary file.
+
+    Pipe-delimited GEO_ID|estimate|margin. Only place-level rows are kept;
+    the file also carries nation, state and dozens of other geography levels.
+    """
+    text = raw.decode("utf-8", errors="replace")
     population: dict[str, int] = {}
-    for row in csv.DictReader(io.StringIO(text)):
-        if row.get("SUMLEV") not in PLACE_SUMMARY_LEVELS:
-            continue
-        place = (row.get("PLACE") or "").strip()
-        state = (row.get("STATE") or "").strip()
-        if not place or place == "00000":
+    for row in csv.DictReader(io.StringIO(text), delimiter="|"):
+        geo = (row.get("GEO_ID") or "").strip()
+        if not geo.startswith(ACS_PLACE_PREFIX):
             continue
         try:
-            count = int(row.get("POPESTIMATE2024") or 0)
+            count = int(row.get("B01003_E001") or 0)
         except ValueError:
             continue
-        geoid = f"{state}{place}"
-        population[geoid] = max(population.get(geoid, 0), count)
+        # Suppressed or unavailable cells come through as large negatives.
+        if count < 0:
+            continue
+        population[geo[len(ACS_PLACE_PREFIX):]] = count
     return population
 
 
@@ -160,7 +167,9 @@ def display_name(raw_name: str) -> str:
 def load_places(raw_zip: bytes) -> list[Place]:
     with zipfile.ZipFile(io.BytesIO(raw_zip)) as archive:
         member = next(n for n in archive.namelist() if n.endswith(".txt"))
-        text = archive.read(member).decode("latin-1")
+        # UTF-8, verified: reading this as latin-1 turns "La Cañada
+        # Flintridge" into "La CaÃ±ada Flintridge" on the public map.
+        text = archive.read(member).decode("utf-8", errors="replace")
     places: list[Place] = []
     for row in csv.DictReader(io.StringIO(text), delimiter="\t"):
         clean = {(k or "").strip(): (v or "").strip() for k, v in row.items()}
@@ -169,9 +178,13 @@ def load_places(raw_zip: bytes) -> list[Place]:
             lon = float(clean["INTPTLONG"])
         except (KeyError, ValueError):
             continue
+        try:
+            aland = int(clean.get("ALAND") or 0)
+        except ValueError:
+            aland = 0
         places.append(Place(
             geoid=clean["GEOID"], state=clean["USPS"],
-            name=display_name(clean["NAME"]), lat=lat, lon=lon,
+            name=display_name(clean["NAME"]), lat=lat, lon=lon, aland=aland,
         ))
     return places
 
@@ -185,7 +198,10 @@ def assign_tiers(places: list[Place], population: dict[str, int]) -> None:
     for place in places:
         by_state[place.state].append(place)
     for group in by_state.values():
-        group.sort(key=lambda p: p.pop, reverse=True)
+        # Land area breaks ties so that a state whose places all lack a
+        # population figure still ranks by something meaningful rather than
+        # falling through to file order, which is alphabetical.
+        group.sort(key=lambda p: (p.pop, p.aland), reverse=True)
         for rank, place in enumerate(group, start=1):
             place.rank = rank
 
