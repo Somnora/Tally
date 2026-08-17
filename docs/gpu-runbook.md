@@ -65,6 +65,17 @@ Fresh instance to serving: ~20 min (boot 6 + venv/vllm 5 + driver/reboot 5 +
 model load 4; first-ever model download adds ~5-10). Extraction, 53 docs /
 83 chunks: ~13 min on the A100. Whole pilot run: well under $1 of A100 time.
 
+The venv now lives on the NFS (`$NFS/tally-venv`), so a SECOND launch skips
+the vllm install entirely and goes boot -> serve. Measured 2026-08-16: a
+reused venv reached serving in about 11 min against ~25 for a cold one. The
+script tests whether the venv imports vllm rather than whether the directory
+exists, because a persisted venv can be half-installed and would otherwise be
+trusted and then fail after the model had already spent ten minutes loading.
+
+torch.compile artifacts still land in `~/.cache/vllm`, which is ephemeral, so
+each fresh box pays ~2 min of compile. Moving `VLLM_CACHE_ROOT` to the NFS
+would remove that too; not done yet.
+
 ## Instance lifecycle (resolved)
 
 The two lost instances on the first night were NOT reaped by Manifold — its
@@ -74,3 +85,39 @@ a readiness check timed out). With correct readiness polling, API-launched
 instances are stable; Manifold also adopts externally-launched instances for
 Files/chat/telemetry. Everything here is restartable regardless (weights on
 NFS, extraction resumes via DBOS + per-document bookkeeping).
+
+## Sharing the account with other projects (2026-08-16)
+
+Two A100s were terminated by a DIFFERENT project's agent session on this
+machine, one during boot and one about 60 seconds before it would have
+served. That session was not being careless: `GET /instances` returns no
+owner and no launch note, so an unattributed box is all it could see, and
+Manifold's `idle_status()` reported only `idle_seconds` and
+`timeout_seconds`, which during warmup reads exactly like an abandoned
+server. Its note was "verified idle... 0 users, no user processes, nothing
+written to the NFS".
+
+Every part of that is true of a healthy box loading a 27B model. There are no
+logged-in users, no obvious user processes, and no NFS writes, because the
+weights are being READ from the shared cache. The reliable tell is
+`nvidia-smi`: a warming vLLM already holds 30GB of VRAM.
+
+What to do about it:
+
+- Pass a `note` on every `launch_gpu` naming the project. It is what another
+  session sees via `get_launch_status`, and once Manifold's phase-94 work
+  ships it surfaces directly in `list_instances` as `purpose`.
+- Set `idle_timeout_seconds` at launch. The default sweep terminates a
+  READY-but-silent server after 1800s, which a long local processing stage
+  can exceed. We pass 7200 plus a `max_lifetime_seconds` ceiling as the
+  runaway guard.
+- Do not terminate a box this project did not launch, and expect the same in
+  return.
+
+Manifold's OpenAI proxy on localhost:8000 only routes to `vllm-serve` JOBS,
+not to a server started by this script over SSH; it answers `no_model_served`
+and lists no models. So the pipeline still reaches the model through
+`ssh -f -N -L 8801:127.0.0.1:8000` and `VLLM_BASE_URL=http://127.0.0.1:8801/v1`.
+The cost of that is real: tunnel traffic is invisible to Manifold, so it does
+not reset the idle clock, which is the other reason to set the timeout
+explicitly rather than rely on the default.
