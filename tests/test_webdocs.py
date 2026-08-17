@@ -1,6 +1,12 @@
 """Pure tests for campaign-page link discovery and text extraction."""
 
-from pipeline.webdocs import MIN_TEXT_CHARS, discover_issue_links, extract_text
+from pipeline.webdocs import (
+    MIN_TEXT_CHARS,
+    discover_child_links,
+    discover_issue_links,
+    discover_press_index,
+    extract_text,
+)
 
 HOMEPAGE = b"""
 <html><body>
@@ -54,3 +60,91 @@ def test_extract_text_keeps_substantive_pages() -> None:
     assert text is not None
     assert len(text) >= MIN_TEXT_CHARS
     assert "rural communities" in text
+
+
+# A house.gov layout, reduced from the four real gap-member sites diagnosed on
+# 2026-08-17: no link anywhere carries "issue" in its path (the Issues
+# dropdown is script-rendered), the About section fans out into logistics, and
+# the substantive labels live in anchor TEXT, not in the URL.
+HOUSE_GOV = b"""
+<html><body><nav>
+  <a href="/about">Meet the Member</a>
+  <a href="/about/committees-and-caucuses">Committees and Caucuses</a>
+  <a href="/about/staff-page">Staff Page</a>
+  <a href="/about/our-district">Our District</a>
+  <a href="/about/votes-and-legislation">Votes and Legislation</a>
+  <a href="/contact/offices">Office Locations</a>
+  <a href="/services/flags">Flags</a>
+  <a href="/services/help-federal-agency">Help with a Federal Agency</a>
+  <a href="/media/press-releases">Press Releases</a>
+  <a href="/media/press-kit">Press Kit</a>
+  <a href="/sites/files/issues-flyer.png">Our Issues (flyer)</a>
+</nav></body></html>
+"""
+
+
+def test_anchor_text_finds_what_the_path_hides() -> None:
+    """"Votes and Legislation" is the policy link; its path alone says so only
+    via 'legislat', and other CMSes label it with paths no list anticipates."""
+    links = discover_issue_links(HOUSE_GOV, "https://member.house.gov/")
+    assert "https://member.house.gov/about/votes-and-legislation" in links
+
+
+def test_junk_segments_do_not_eat_the_budget() -> None:
+    """The original failure: 'about' matched staff pages, district maps and
+    event calendars, and a real member got five pages of logistics while the
+    issue content sat unfetched. Junk loses even when a keyword matches."""
+    links = discover_issue_links(HOUSE_GOV, "https://member.house.gov/")
+    assert "https://member.house.gov/about" in links
+    for junk in ("committees-and-caucuses", "staff-page", "our-district",
+                 "offices", "flags", "help-federal-agency", "press-kit"):
+        assert all(junk not in link for link in links), junk
+
+
+def test_binary_assets_never_match() -> None:
+    links = discover_issue_links(HOUSE_GOV, "https://member.house.gov/")
+    assert all(not link.endswith(".png") for link in links)
+
+
+ISSUES_INDEX = b"""
+<html><body>
+  <a href="/issues/economy">Economy</a>
+  <a href="/issues/education">Education</a>
+  <a href="/issues/veterans">Veterans</a>
+  <a href="/issues">Issues (self)</a>
+  <a href="/about">About</a>
+  <a href="https://elsewhere.example/issues/economy">External</a>
+</body></html>
+"""
+
+
+def test_child_links_walk_one_level_under_the_index() -> None:
+    """An /issues page on this CMS is a tile grid; the member's words live at
+    /issues/<topic>. The walk must return children only: not the index itself,
+    not siblings, not other hosts."""
+    children = discover_child_links(ISSUES_INDEX, "https://member.house.gov/issues")
+    assert children == [
+        "https://member.house.gov/issues/economy",
+        "https://member.house.gov/issues/education",
+        "https://member.house.gov/issues/veterans",
+    ]
+
+
+def test_press_index_is_found_by_path_or_text_and_media_alone_is_not() -> None:
+    assert discover_press_index(HOUSE_GOV, "https://member.house.gov/") == \
+        "https://member.house.gov/media/press-releases"
+    media_only = b'<a href="/media">Media</a><a href="/media/gallery">Photos</a>'
+    assert discover_press_index(media_only, "https://member.house.gov/") is None
+
+
+def test_press_release_slugs_stay_out_of_issue_discovery() -> None:
+    """Slugs like ".../leads-legislation-establish-..." are keyword bait; left
+    in, they arrive through issue discovery mislabelled and eat the budget the
+    dedicated press walk exists to serve."""
+    html = b'''
+      <a href="/media/press-releases/leads-legislation-establish-reserve">Leads Legislation</a>
+      <a href="/media/in-the-news/member-plans-new-push">In the News</a>
+      <a href="/issues">Issues</a>
+    '''
+    links = discover_issue_links(html, "https://member.house.gov/")
+    assert links == ["https://member.house.gov/issues"]

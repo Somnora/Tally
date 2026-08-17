@@ -57,6 +57,17 @@ def _store_page(
     stats["documents_stored"] += 1
 
 
+# Path tails that mark an INDEX page: a grid of topic tiles whose children,
+# not itself, carry the member's words. Fetching one triggers a walk of its
+# children.
+_INDEX_TAILS = ("issues", "priorities", "legislation", "platform", "agenda")
+
+# Hard ceiling on fetches for one site, homepage and probes included. The
+# politeness delay makes every page cost 1.5s, so an unbounded walk is a time
+# problem before it is a bandwidth one.
+MAX_SITE_PAGES = 24
+
+
 def sync_site(
     conn: db.Connection,
     politician_id: int,
@@ -65,35 +76,96 @@ def sync_site(
     doc_type: str = "campaign_site",
     source_type: str = "campaign_site_html",
     homepage_title: str = "Campaign homepage",
+    probe_paths: tuple[str, ...] = (),
+    press_release_cap: int = 0,
 ) -> dict[str, Any]:
-    """Homepage + issue pages. Returns stats plus the page URLs (for wayback).
+    """Homepage + issue pages (+ probed indexes and their children).
 
     The same walk serves a campaign site and a member's official
     house.gov/senate.gov site; only the labels differ, and they differ because
     government speech and campaign speech are not the same claim about a
     person even when the walk that finds them is identical.
+
+    probe_paths exist because link discovery can only see links that are in
+    the HTML. The house.gov CMS keeps its Issues section in a script-rendered
+    dropdown, so /issues is real, full of positions, and linked from nowhere a
+    parser can reach: 82 of 185 members with no extracted promises had no
+    issue page found at all, while /issues answered directly on every site
+    probed. A probe that 404s costs one polite request and is counted, not
+    treated as an error.
+
+    press_release_cap follows the newest press releases when an index for
+    them is discovered. On several official sites the issue pages are
+    boilerplate feeds and the member's actual commitments appear only in
+    releases, which the ingestion blueprint has always named as a source.
     """
     stats: StageStats = {"pages_fetched": 0, "pages_failed": 0,
-                         "pages_without_content": 0, "documents_stored": 0}
+                         "pages_without_content": 0, "documents_stored": 0,
+                         "probes_missed": 0, "index_children_fetched": 0,
+                         "press_releases_stored": 0}
     page_urls: list[str] = []
+    fetched: set[str] = set()
 
-    homepage = webdocs.client().get(site_url)
+    def fetch(url: str, *, speculative: bool = False) -> bytes | None:
+        key = url.rstrip("/")
+        if key in fetched or len(fetched) >= MAX_SITE_PAGES:
+            return None
+        fetched.add(key)
+        html = webdocs.client().get(url)
+        if html is None:
+            stats["probes_missed" if speculative else "pages_failed"] += 1
+            return None
+        stats["pages_fetched"] += 1
+        page_urls.append(url)
+        return html
+
+    homepage = fetch(site_url)
     if homepage is None:
-        stats["pages_failed"] += 1
         return {"stats": stats, "page_urls": page_urls}
-    stats["pages_fetched"] += 1
-    page_urls.append(site_url)
     _store_page(conn, politician_id, site_url, homepage,
                 doc_type, source_type, homepage_title, stats)
 
-    for link in webdocs.discover_issue_links(homepage, site_url):
-        html = webdocs.client().get(link)
+    def walk_children(index_html: bytes, index_url: str) -> None:
+        for child in webdocs.discover_child_links(index_html, index_url):
+            child_html = fetch(child)
+            if child_html is None:
+                continue
+            stats["index_children_fetched"] += 1
+            _store_page(conn, politician_id, child, child_html,
+                        doc_type, source_type, None, stats)
+
+    candidates = webdocs.discover_issue_links(homepage, site_url)
+    probes: set[str] = set()
+    for probe in probe_paths:
+        probe_url = site_url.rstrip("/") + probe
+        if probe_url.rstrip("/") not in {c.rstrip("/") for c in candidates}:
+            candidates.append(probe_url)
+            probes.add(probe_url.rstrip("/"))
+
+    for link in candidates:
+        html = fetch(link, speculative=link.rstrip("/") in probes)
         if html is None:
-            stats["pages_failed"] += 1
             continue
-        stats["pages_fetched"] += 1
-        page_urls.append(link)
         _store_page(conn, politician_id, link, html, doc_type, source_type, None, stats)
+        if link.rstrip("/").rsplit("/", 1)[-1].lower() in _INDEX_TAILS:
+            walk_children(html, link)
+
+    if press_release_cap:
+        press_index = webdocs.discover_press_index(homepage, site_url)
+        if press_index:
+            index_html = fetch(press_index)
+            if index_html is not None:
+                for leaf in webdocs.discover_child_links(
+                    index_html, press_index, cap=press_release_cap
+                ):
+                    leaf_html = fetch(leaf)
+                    if leaf_html is None:
+                        continue
+                    before = stats["documents_stored"]
+                    _store_page(conn, politician_id, leaf, leaf_html,
+                                "press_release", source_type, None, stats)
+                    if stats["documents_stored"] > before:
+                        stats["press_releases_stored"] += 1
 
     return {"stats": stats, "page_urls": page_urls}
 
@@ -113,11 +185,20 @@ def sync_official_site(
     Stored as official_site, never campaign_site: this is a congressional
     office publishing under rules that restrict campaign content, and a reader
     is entitled to know which of the two they are looking at.
+
+    /issues is probed unconditionally because the house.gov CMS renders its
+    Issues dropdown with script, so the section is real and linked from
+    nowhere a parser can see. Press releases are followed because on many of
+    these sites they are where the member's commitments actually appear; they
+    are stored under their own doc_type, which the schema has carried for
+    exactly this since the beginning.
     """
     return sync_site(
         conn, politician_id, official_url,
         doc_type="official_site", source_type="official_site_html",
         homepage_title="Official congressional website",
+        probe_paths=("/issues",),
+        press_release_cap=6,
     )
 
 

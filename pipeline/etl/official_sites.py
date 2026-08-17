@@ -20,9 +20,10 @@ lands as doc_type 'official_site' and stays distinguishable from
 
 Etiquette comes from pipeline.webdocs: robots.txt is checked per host and
 honoured, requests are spaced 1.5 seconds apart, and the User-Agent names the
-project. At roughly seven pages a member this is a slow, unattended run by
-design; going faster would mean hammering congressional web servers to save
-an afternoon.
+project. At up to ~20 pages a member (homepage, issue pages and their index
+children, a handful of recent press releases) this is a slow, unattended run
+by design; going faster would mean hammering congressional web servers to
+save an afternoon.
 
 Run:  uv run python -m pipeline.etl.official_sites --dry-run
       uv run python -m pipeline.etl.official_sites
@@ -109,6 +110,23 @@ def already_harvested(conn: db.Connection) -> set[int]:
     }
 
 
+def members_without_promises(conn: db.Connection) -> set[int]:
+    """Members whose harvest produced no promises: the crawler's known misses.
+
+    The gap the improved crawl exists to close. These members HAVE documents,
+    so the resume logic would skip every one of them; re-fetching is safe
+    because documents upsert on content hash, meaning an unchanged page is a
+    no-op and only genuinely new pages arrive as new rows awaiting extraction.
+    """
+    return {
+        int(r[0])
+        for r in conn.execute(
+            "SELECT politician_id FROM politicians p WHERE NOT EXISTS "
+            "(SELECT 1 FROM promises pr WHERE pr.politician_id = p.politician_id)"
+        ).fetchall()
+    }
+
+
 def harvest(members: list[Member], resume: bool = True) -> Counter[str]:
     stats: Counter[str] = Counter()
     stats["members"] = len(members)
@@ -154,11 +172,17 @@ def main() -> None:
                         help="list what would be harvested and fetch nothing")
     parser.add_argument("--no-resume", action="store_true",
                         help="re-harvest members that already have documents")
+    parser.add_argument("--only-gaps", action="store_true",
+                        help="only members whose harvest produced no promises "
+                             "(implies re-fetching; unchanged pages are no-ops)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     with db.connect() as conn:
         members = roster(conn, args.cycle, only_candidates=not args.all_members)
+        if args.only_gaps:
+            gaps = members_without_promises(conn)
+            members = [m for m in members if m.politician_id in gaps]
     if args.limit:
         members = members[: args.limit]
 
@@ -171,7 +195,7 @@ def main() -> None:
             print(f"  ... and {len(members) - 10} more")
         return
 
-    stats = harvest(members, resume=not args.no_resume)
+    stats = harvest(members, resume=not (args.no_resume or args.only_gaps))
     print("\nofficial-site harvest complete")
     for key in sorted(stats):
         print(f"  {key:<28} {stats[key]}")
