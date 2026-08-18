@@ -196,7 +196,7 @@ def test_every_table_exists_even_when_empty(conn: db.Connection, tmp_path: Path)
     out, _ = _snapshot(tmp_path, conn)
     tables = _tables(out)
     for expected in ("races", "candidates", "finance", "top_donors",
-                     "promises", "evaluations", "evidence"):
+                     "outside_spenders", "promises", "evaluations", "evidence"):
         assert expected in tables, f"{expected} missing from snapshot"
         assert tables[expected], f"{expected} has no columns"
 
@@ -211,3 +211,37 @@ def test_manifest_is_json_serializable(conn: db.Connection, tmp_path: Path) -> N
     round_tripped = json.loads(json.dumps(manifest))
     assert round_tripped["row_counts"]["promises"] == 1
     assert isinstance(round_tripped["generated_at"], str)
+
+
+def test_outside_spenders_travel_with_the_totals_they_explain(
+    conn: db.Connection, tmp_path: Path
+) -> None:
+    """The snapshot IS the public product, so an unattributed total here is an
+    unattributed total on the site. Independent expenditure is the uncapped
+    money; shipping its sum without the committee that spent it is the gap
+    this table exists to close."""
+    from tests.test_finance_schema import _donation_row, _seed_candidate
+
+    politician_id, source_id = _seed_candidate(conn)
+    db.upsert_committee(
+        conn, cmte_id="C00000009", name="Big Outside Group", cmte_type="O",
+        cmte_designation="U", party=None, connected_org=None, cand_id=None,
+        state=None, cycle=2026, source_id=source_id,
+    )
+    db.upsert_donations_bulk(conn, [
+        _donation_row(politician_id, source_id, fec_sub_id="4020269001",
+                      recipient_cmte_id=None, contributor_cmte_id="C00000009",
+                      contributor_name="Big Outside Group",
+                      transaction_tp="24E", amount=750_000),
+    ])
+    db.refresh_finance_views(conn)
+    out, manifest = _snapshot(tmp_path, conn)
+
+    assert manifest["row_counts"]["outside_spenders"] == 1
+    rows = _rows(out, "SELECT spender_name, stance, total_amount, spender_cmte_id "
+                      "FROM outside_spenders")
+    assert rows[0][0] == "Big Outside Group"
+    assert rows[0][1] == "supporting"
+    # The committee id has to survive, or the reader cannot check the claim
+    # against the FEC record it came from.
+    assert rows[0][3] == "C00000009"

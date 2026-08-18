@@ -233,6 +233,24 @@ svg.map path:focus-visible{outline:none;stroke:var(--ink);stroke-width:2.4}
 .out-row b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-variant-numeric:tabular-nums;font-weight:600}
 .out-note{margin:7px 0 0;font-size:11.5px;color:var(--muted);line-height:1.5}
+.sp-group{margin-top:9px}
+.sp-group h5{margin:0 0 4px;font-size:11px;color:var(--muted);font-weight:600;
+  letter-spacing:.04em}
+.sp{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:3px 0;
+  border-bottom:1px dotted var(--rule);text-decoration:none;color:inherit}
+.sp:last-child{border-bottom:none}
+.sp:hover span:first-child{text-decoration:underline}
+.sp span:first-child{color:var(--ink-soft);min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.sp span:last-child{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-variant-numeric:tabular-nums;flex:none}
+
+.donor-note{margin:8px 0 0;font-size:11px;color:var(--muted);line-height:1.5}
+.cover{margin-top:10px}
+.cover-bar{height:4px;background:var(--rule);border-radius:2px;overflow:hidden}
+.cover-bar span{display:block;height:100%;background:var(--muted);opacity:.65}
+.cover-note{margin:6px 0 0;font-size:11px;color:var(--muted);line-height:1.5}
+.cover-note a{color:var(--muted)}
 
 .record{padding:16px 20px;border-bottom:1px solid var(--rule)}
 .record h4{margin:0 0 10px;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;

@@ -64,6 +64,66 @@ Accounting rules applied to itemized records:
 - Amended filings replace earlier versions of the same record rather than
   being counted twice.
 
+### Naming the money that has no limit on it
+
+A political action committee may give a candidate $5,000 per election, which
+is $10,000 across a primary and a general. There is no comparable ceiling on
+spending independently for or against that same candidate. The practical
+result is that a candidate's largest direct donors are often a row of
+identical $10,000 entries, while the decisive money sits in independent
+expenditure beside them. Party committees, and transfers from a candidate's
+own affiliated committees, follow different rules and can appear in a donor
+list for considerably more. Across the candidates we cover,
+outside spending exceeds the single largest direct donor for a clear majority
+of those who have any.
+
+We therefore name the committees that spend independently, not just the
+total. Each candidate shows the largest spenders for and against them, each
+one linked to its own FEC record, ranked separately by side so that a lone
+committee spending against a candidate is never pushed off the list by a
+crowd of supporters. Naming them costs us nothing in accuracy: the spending
+committee's identifier is part of the filing, and it covers all but a
+fraction of a percent of the outside dollars we hold.
+
+This is a mechanical rule applied to every candidate. We do not decide which
+backers are worth mentioning, and we do not annotate any candidate with a
+description of who supports them. The list is whoever filed the spending.
+
+### How much of the money we can actually show you
+
+Campaigns report their totals to the FEC in summary form, and separately file
+the itemized records behind those totals. We hold all of the summaries and
+only part of the itemization, so every candidate shows how much of their
+individual contributions we hold as itemized records.
+
+The gap is uneven in a way worth stating plainly. Contributions from
+committees are close to complete. Itemized contributions from individuals,
+which are the larger share of what most campaigns raise, are largely not yet
+loaded. So a donor list on this site is a reasonably complete picture of
+committee money and a very incomplete picture of individual money.
+
+We measure that gap on individual contributions alone, and it is worth saying
+why, because the first version of this measure was wrong. Combining committee
+and individual money into one ratio reported that we held more money than
+existed for 388 candidates. Two causes: our committee sums include
+coordinated party expenditures and in-kind transfers, which the FEC's own
+contribution total does not count, and itemized filings routinely post-date
+the summary they belong to. A coverage figure above 100 percent discredits
+the disclosure it is trying to make. Individual money suffers from neither
+distortion, and it is the gap that actually matters, so that is what the
+number reports.
+
+This matters for one mechanism in particular. Organizations that bundle
+earmarked contributions from many individuals exercise influence through
+exactly the channel we have least of, and their role is correspondingly
+under-represented in what we can show today. We would rather publish that
+limitation next to every donor list than let a short list imply a complete
+one.
+
+Contributions below the itemization threshold are excluded from both sides of
+this measure, because no itemized record of them exists at the FEC either.
+Counting them against ourselves would describe a gap that nobody could close.
+
 ## How voting records are collected
 
 Roll-call votes come directly from each chamber's official record: House
@@ -252,7 +312,9 @@ Coverage is uneven, and the app says so per candidate rather than leaving you
 to guess. At present:
 
 - Campaign finance covers every federal candidate on file with the FEC for
-  this cycle.
+  this cycle. Reported totals and independent expenditure are complete;
+  itemized contribution records behind those totals are only partly loaded,
+  and each candidate states how much of theirs we hold.
 - Voting records cover sitting members of Congress. A challenger who has
   never held federal office has no roll call record to compare against, and
   we show no alignment scoring for them.

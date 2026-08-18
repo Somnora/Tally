@@ -8,8 +8,10 @@ outside. That makes the export the last gate rather than a plumbing step.
 What travels, and what does not:
 
   travels   races, candidates, finance ROLLUPS, top donor committees,
-            displayable promises with a context window, current evaluations
-            whose every citation validated, and the cited votes themselves.
+            the committees that spent independently for or against each
+            candidate, displayable promises with a context window, current
+            evaluations whose every citation validated, and the cited votes
+            themselves.
   stays     itemized contributions (34 MB of donor names and addresses; the
             app deep-links to fec.gov), raw source payloads (24 MB), whole
             documents, the 344,000-row voting_records table, extraction
@@ -86,6 +88,12 @@ TABLES: tuple[TableSpec, ...] = (
     TableSpec("finance", "export_finance", ("cycle",),
               ("candidacy_id", "politician_id")),
     TableSpec("top_donors", "export_top_donors", (),
+              ("candidacy_id",)),
+    # Who spent independently for or against each candidate. Direct
+    # contributions are capped by law; independent expenditure is not, so
+    # this is usually the larger money and it used to travel as an
+    # unattributed total.
+    TableSpec("outside_spenders", "export_outside_spenders", (),
               ("candidacy_id",)),
     TableSpec("promises", "export_promises", ("context_chars",),
               ("politician_id", "topic")),

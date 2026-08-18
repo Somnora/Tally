@@ -2,7 +2,7 @@ const DATA = window.__TALLY__;
 
 /* Bulk tables arrive column-wise to keep the download small; rehydrate them
    into plain objects once, so every render function below reads normally. */
-for(const name of ['candidates','finance','donors','votes','topics','record']){
+for(const name of ['candidates','finance','donors','spenders','votes','topics','record']){
   const t = DATA[name];
   if(t && !Array.isArray(t)){
     DATA[name] = t.rows.map(r => {
@@ -101,10 +101,13 @@ function renderRace(){
         <div class="money-row"><dt>Cash on hand</dt><dd>${usd(f.cash_on_hand)}</dd></div>
         ${raised?moneyMix(f, raised):''}
       </dl>
-      ${outsideMoney(f)}
+      ${outsideMoney(f, c)}
       ${donors.length?`<div class="donors"><h4>Largest committee donors</h4>${donors.map(d=>
         `<div class="donor"><span>${esc(d.committee_name||'')}</span><span>${usd(d.total_amount)}</span></div>`
-      ).join('')}</div>`:''}
+      ).join('')}<p class="donor-note">A political action committee may give a
+        candidate $5,000 per election, so $10,000 across a primary and a
+        general. Party committees and a candidate&rsquo;s own affiliated
+        committees follow different rules and can appear here for more.</p>${coverage(f)}</div>`:''}
       ${votingRecord(c)}
       <div class="pcount">
         <h4>Promises on record</h4>
@@ -264,15 +267,60 @@ function moneyMix(f, raised){
 
 /* Independent expenditures: money spent for or against a candidate by people
    the candidate does not control, and does not report. Worth its own line
-   because it is invisible in a fundraising total. */
-function outsideMoney(f){
+   because it is invisible in a fundraising total, and worth naming because
+   it is the money with no legal ceiling on it. A direct committee
+   contribution stops at $10,000; this does not, so on most cards below it is
+   the larger number by an order of magnitude. */
+function spendersFor(c, stance){
+  return byId(DATA.spenders,'candidacy_id',c.candidacy_id)
+    .filter(s => s.stance===stance)
+    .sort((a,b)=>a.spender_rank-b.spender_rank);
+}
+
+function spenderList(rows, label){
+  if(!rows.length) return '';
+  return `<div class="sp-group"><h5>${label}</h5>${rows.map(s=>
+    `<a class="sp" href="https://www.fec.gov/data/committee/${esc(s.spender_cmte_id)}/"
+        target="_blank" rel="noopener">
+       <span>${esc(s.spender_name||'')}</span><span>${usd(s.total_amount)}</span>
+     </a>`).join('')}</div>`;
+}
+
+function outsideMoney(f, c){
   const forC = Number(f.ie_support||0), against = Number(f.ie_oppose||0);
   if(!forC && !against) return '';
+  const sup = spendersFor(c,'supporting'), opp = spendersFor(c,'opposing');
   return `<div class="outside"><h4>Outside spending</h4>
     <div class="out-row"><span>Supporting</span><b>${usd(forC)}</b></div>
     <div class="out-row"><span>Opposing</span><b>${usd(against)}</b></div>
-    <p class="out-note">Spent independently by other groups, not by the campaign.</p></div>`;
+    ${spenderList(sup,'Spent supporting')}
+    ${spenderList(opp,'Spent opposing')}
+    <p class="out-note">Spent independently by other groups, not by the campaign,
+      and not subject to contribution limits. Largest spenders shown; each links
+      to its FEC record.</p></div>`;
 }
+
+/* How much of this campaign's individual contributions we actually hold.
+   Shown because the donor list above it looks complete and is not: committee
+   money is close to complete, itemized individual money is barely loaded,
+   and individual money is the larger share of what campaigns raise. Saying
+   so is the difference between a short list and a misleading one. */
+function coverage(f){
+  const owed = Number(f.individual_itemized_official||0);
+  const held = Number(f.individual_itemized_loaded||0);
+  if(owed <= 0) return '';
+  const pct = Math.min(100, Math.round(held/owed*100));
+  return `<div class="cover">
+    <div class="cover-bar" role="img"
+         aria-label="We hold ${pct} percent of itemized individual contributions">
+      <span style="width:${pct}%"></span></div>
+    <p class="cover-note">Individual contributions: we hold itemized records for
+      ${usd(held)} of the ${usd(owed)} this campaign reports (${pct}%). Committee
+      money above is close to complete; individual money, which is the larger
+      share and the way bundled giving arrives, is largely not yet loaded.
+      <a href="methodology.html">How coverage is measured</a></p></div>`;
+}
+
 
 /* A sitting member's own record. This is what a card shows instead of an
    apology when nobody has researched their promises yet. */

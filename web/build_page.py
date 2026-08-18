@@ -92,11 +92,12 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
     finance = _rows(con, """
         SELECT candidacy_id, politician_id, total_receipts, cash_on_hand,
                pac_contributions_official, individual_itemized_official,
-               individual_unitemized, ie_support, ie_oppose
+               individual_unitemized, ie_support, ie_oppose,
+               individual_itemized_loaded
         FROM finance WHERE total_receipts > 0""")
     money_cols = ("total_receipts", "cash_on_hand", "pac_contributions_official",
                   "individual_itemized_official", "individual_unitemized",
-                  "ie_support", "ie_oppose")
+                  "ie_support", "ie_oppose", "individual_itemized_loaded")
     for row in finance:
         for key in money_cols:
             row[key] = round(float(row[key] or 0))
@@ -104,6 +105,14 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         SELECT candidacy_id, committee_name, total_amount, donor_rank
         FROM top_donors WHERE donor_rank <= 3""")
     for row in donors:
+        row["total_amount"] = round(float(row["total_amount"] or 0))
+    # Outside spenders travel per stance, so a lone committee spending
+    # against a candidate is never crowded out of the list by supporters.
+    spenders = _rows(con, """
+        SELECT candidacy_id, spender_cmte_id, spender_name, stance,
+               total_amount, spender_rank
+        FROM outside_spenders WHERE spender_rank <= 4""")
+    for row in spenders:
         row["total_amount"] = round(float(row["total_amount"] or 0))
     # An incumbent's own voting record. Restricted to people actually shown,
     # so members who are not on this year's ballot cost the reader nothing.
@@ -125,6 +134,7 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         "candidates": candidates,
         "finance": finance,
         "donors": donors,
+        "spenders": spenders,
         "promises": _rows(con, "SELECT * FROM promises"),
         # Normalised: 21,711 promise-vote rows referenced only 244 distinct
         # bills, so carrying each bill's title and summary inline repeated the
@@ -164,7 +174,8 @@ def build() -> Path:
     # "pac_contributions_official" across 2,730 rows costs 76 KB in key names
     # alone, and the reader downloads every byte. app.js rehydrates them into
     # ordinary objects at load, so nothing downstream knows the difference.
-    for name in ("candidates", "finance", "donors", "votes", "topics", "record"):
+    for name in ("candidates", "finance", "donors", "spenders", "votes",
+                 "topics", "record"):
         rows = payload[name]
         if not rows:
             payload[name] = {"cols": [], "rows": []}
