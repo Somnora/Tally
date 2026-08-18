@@ -1,8 +1,13 @@
-"""Pure unit tests for the itemized-row mappers (no network, no DB)."""
+"""Tests for the itemized loader: the row mappers, and the committee map.
+
+The mappers are pure. The committee map is not, because what it gets wrong
+is a database question: which candidate a committee raises money as.
+"""
 
 from datetime import date
 from decimal import Decimal
 
+from pipeline import db
 from pipeline.etl.fec_itemized import (
     StateContext,
     indiv_row_to_donation,
@@ -102,3 +107,106 @@ def test_indiv_row_maps_donor_details() -> None:
 def test_indiv_row_for_unknown_committee_is_filtered_out() -> None:
     row = {"CMTE_ID": "C00999999", "TRANSACTION_AMT": "250", "SUB_ID": "sub6"}
     assert indiv_row_to_donation(row, CTX, source_id=2, stats=_stats()) is None
+
+
+def test_committee_map_excludes_committees_a_candidate_does_not_raise_as(
+    conn: db.Connection,
+) -> None:
+    """committees.cand_id is not a claim that the committee raises money AS
+    that candidate.
+
+    The FEC master populates cand_id for committees merely associated with a
+    candidate. The NRSC carries a Senate candidate's id there, so joining on
+    cand_id alone attributed the NRSC's 755,501 individual contributions,
+    $51.5 million, to Dan Sullivan, whose own committee raised $2.3 million.
+    Party committees, joint fundraisers and leadership PACs are the large
+    ones, so the error fell hardest on leadership figures. Only authorized
+    committees, designation P and A, may map.
+    """
+    source_id = db.insert_source(
+        conn, source_type="test_cmte_map", url="https://example.test/map",
+        content_hash="cmte-map-fixture", raw_payload=b"x",
+    )
+    politician_id = db.upsert_politician_by_fec_id(
+        conn, full_name="DOE, JANE", party="IND", state="ME",
+        fec_candidate_id="S6ME00001", source_id=source_id,
+    )
+    for cmte_id, name, designation in (
+        ("C00000001", "Jane Doe for Senate", "P"),   # her own committee
+        ("C00000010", "Doe Victory Fund", "J"),      # joint fundraiser
+        ("C00000011", "Big Party Committee", "U"),   # party committee
+        ("C00000012", "Doe Leadership PAC", "D"),    # leadership PAC
+        ("C00000013", "Doe Authorized Two", "A"),    # a second authorized one
+    ):
+        db.upsert_committee(
+            conn, cmte_id=cmte_id, name=name, cmte_type="S",
+            cmte_designation=designation, party=None, connected_org=None,
+            cand_id="S6ME00001", state="ME", cycle=2026, source_id=source_id,
+        )
+    race_id = db.upsert_race(
+        conn, cycle=2026, state="ME", office="senate", district=None, senate_class=2,
+    )
+    db.upsert_candidacy(
+        conn, race_id=race_id, politician_id=politician_id,
+        fec_candidate_id="S6ME00001", party="IND", incumbent_challenger="C",
+        cand_status="C", principal_cmte_id="C00000001", source_id=source_id,
+    )
+
+    mapped = set(db.state_committee_map(conn, "ME", 2026))
+    assert mapped == {"C00000001", "C00000013"}, (
+        "only authorized committees may raise money as this candidate; "
+        f"got {sorted(mapped)}"
+    )
+    # The same restriction has to hold for a national pass, which is the one
+    # that actually meets the NRSC.
+    assert set(db.state_committee_map(conn, "ALL", 2026)) == {"C00000001", "C00000013"}
+
+
+def test_a_redesignated_committee_maps_to_the_seat_its_owner_is_running_for(
+    conn: db.Connection,
+) -> None:
+    """A member seeking a different seat keeps their committee.
+
+    The committee is then the principal committee of BOTH candidacies while
+    the FEC's own cand_id names the live one. Trusting principal_cmte_id
+    alongside that linkage mapped one committee to two candidates, and the
+    map being a dict meant one silently won: Chris Pappas's $5.6 million
+    landed on a House seat he is not running for while his Senate campaign,
+    which the FEC credits with $7.5 million, read zero. 40 live candidacies
+    were showing nothing for this reason.
+    """
+    source_id = db.insert_source(
+        conn, source_type="test_redesignation", url="https://example.test/rd",
+        content_hash="redesignation-fixture", raw_payload=b"x",
+    )
+    house_pid = db.upsert_politician_by_fec_id(
+        conn, full_name="ROE, SAM (HOUSE)", party="IND", state="ME",
+        fec_candidate_id="H8ME00001", source_id=source_id,
+    )
+    senate_pid = db.upsert_politician_by_fec_id(
+        conn, full_name="ROE, SAM (SENATE)", party="IND", state="ME",
+        fec_candidate_id="S6ME00002", source_id=source_id,
+    )
+    # One committee, redesignated to the Senate run: FEC's cand_id says so.
+    db.upsert_committee(
+        conn, cmte_id="C00000021", name="Sam Roe for Senate", cmte_type="S",
+        cmte_designation="P", party=None, connected_org=None,
+        cand_id="S6ME00002", state="ME", cycle=2026, source_id=source_id,
+    )
+    house_race = db.upsert_race(
+        conn, cycle=2026, state="ME", office="house", district="01", senate_class=None)
+    senate_race = db.upsert_race(
+        conn, cycle=2026, state="ME", office="senate", district=None, senate_class=2)
+    # Both candidacies still name it as their principal committee.
+    for race_id, pid, fec_id in ((house_race, house_pid, "H8ME00001"),
+                                 (senate_race, senate_pid, "S6ME00002")):
+        db.upsert_candidacy(
+            conn, race_id=race_id, politician_id=pid, fec_candidate_id=fec_id,
+            party="IND", incumbent_challenger="C", cand_status="C",
+            principal_cmte_id="C00000021", source_id=source_id,
+        )
+
+    mapping = db.state_committee_map(conn, "ALL", 2026)
+    assert mapping["C00000021"] == "S6ME00002", (
+        "money went to the seat its owner is no longer running for"
+    )

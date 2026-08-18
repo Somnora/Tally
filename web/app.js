@@ -315,9 +315,10 @@ function coverage(f){
          aria-label="We hold ${pct} percent of itemized individual contributions">
       <span style="width:${pct}%"></span></div>
     <p class="cover-note">Individual contributions: we hold itemized records for
-      ${usd(held)} of the ${usd(owed)} this campaign reports (${pct}%). Committee
-      money above is close to complete; individual money, which is the larger
-      share and the way bundled giving arrives, is largely not yet loaded.
+      ${usd(held)} of the ${usd(owed)} this campaign reports (${pct}%). The
+      remainder is mostly contributions filed since our last bulk load. Where
+      giving was bundled through a conduit we can see that it was, but cannot
+      yet name the organisation that bundled it.
       <a href="methodology.html">How coverage is measured</a></p></div>`;
 }
 

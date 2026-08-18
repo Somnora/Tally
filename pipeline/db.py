@@ -7,6 +7,7 @@ Rules enforced here:
     success and rolls back on exception (psycopg connection semantics).
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import date
 from functools import cache
@@ -19,6 +20,8 @@ from psycopg.types.json import Jsonb
 
 from pipeline import evidence
 from pipeline.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 SQL_DIR = Path(__file__).resolve().parent.parent / "db" / "sql"
 
@@ -318,9 +321,34 @@ def state_candidacies(conn: Connection, state: str, cycle: int) -> list[Candidac
 
 
 def state_committee_map(conn: Connection, state: str, cycle: int) -> dict[str, str]:
-    """cmte_id -> fec_candidate_id for a state's candidates (indiv-file filter)."""
+    """cmte_id -> fec_candidate_id for a state's candidates (indiv-file filter).
+
+    Collisions are reported, never silently resolved. A dict comprehension
+    over this query used to keep whichever row arrived last, and that is how
+    Chris Pappas's $5.6 million came to sit on a House seat he is not running
+    for while his Senate campaign showed nothing: one committee, two
+    candidacies, no complaint. The query now disambiguates through the FEC's
+    own committee linkage, so anything still colliding is a case it cannot
+    settle and a human should see it.
+    """
     cur = conn.execute(load_sql("select_state_committee_map"), {"state": state, "cycle": cycle})
-    return {str(r[0]): str(r[1]) for r in cur.fetchall()}
+    mapping: dict[str, str] = {}
+    collisions: dict[str, list[str]] = {}
+    for row in cur.fetchall():
+        cmte_id, cand_id = str(row[0]), str(row[1])
+        if cmte_id in mapping and mapping[cmte_id] != cand_id:
+            collisions.setdefault(cmte_id, [mapping[cmte_id]]).append(cand_id)
+        mapping[cmte_id] = cand_id
+    for cmte_id, candidates in collisions.items():
+        # Deterministic, so two runs over the same data agree; the warning is
+        # the point, not the choice.
+        winner = sorted(candidates)[0]
+        mapping[cmte_id] = winner
+        logger.warning(
+            "committee %s maps to %d candidates %s; attributing to %s",
+            cmte_id, len(candidates), sorted(candidates), winner,
+        )
+    return mapping
 
 
 def all_committee_ids(conn: Connection) -> set[str]:

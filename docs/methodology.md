@@ -96,11 +96,20 @@ the itemized records behind those totals. We hold all of the summaries and
 only part of the itemization, so every candidate shows how much of their
 individual contributions we hold as itemized records.
 
-The gap is uneven in a way worth stating plainly. Contributions from
-committees are close to complete. Itemized contributions from individuals,
-which are the larger share of what most campaigns raise, are largely not yet
-loaded. So a donor list on this site is a reasonably complete picture of
-committee money and a very incomplete picture of individual money.
+Contributions from committees are close to complete. Itemized contributions
+from individuals now stand at roughly four fifths of what the FEC's summaries
+report, and the remainder is mostly contributions filed since our last bulk
+load. Each candidate shows their own figure rather than this average, because
+the spread is wide.
+
+One limitation is worth naming precisely, because it bears on the question
+this section exists to answer. Where a contribution was bundled through a
+conduit, the filing says so, and we can see how much of a candidate's money
+arrived that way. It does not name the bundler in the same record, and we do
+not yet read the field that identifies them. So we can currently tell you
+that a candidate received bundled money, and not who organised it. That is a
+real gap in exactly the place where organised giving is most visible, and
+closing it is the next thing we intend to do here.
 
 We measure that gap on individual contributions alone, and it is worth saying
 why, because the first version of this measure was wrong. Combining committee
@@ -312,9 +321,10 @@ Coverage is uneven, and the app says so per candidate rather than leaving you
 to guess. At present:
 
 - Campaign finance covers every federal candidate on file with the FEC for
-  this cycle. Reported totals and independent expenditure are complete;
-  itemized contribution records behind those totals are only partly loaded,
-  and each candidate states how much of theirs we hold.
+  this cycle. Reported totals and independent expenditure are complete.
+  Itemized individual contribution records behind those totals are mostly
+  loaded, unevenly by candidate, and each candidate states how much of
+  theirs we hold.
 - Voting records cover sitting members of Congress. A challenger who has
   never held federal office has no roll call record to compare against, and
   we show no alignment scoring for them.
