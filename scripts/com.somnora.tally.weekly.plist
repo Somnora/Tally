@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Weekly data refresh for Tally. NOT INSTALLED BY DEFAULT: loading this makes
+  a machine publish to a public website on a schedule with nobody watching,
+  which is a decision its owner should make deliberately rather than inherit
+  from a script that ran once.
+
+  Install:
+    cp scripts/com.somnora.tally.weekly.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.somnora.tally.weekly.plist
+
+  Remove:
+    launchctl unload ~/Library/LaunchAgents/com.somnora.tally.weekly.plist
+    rm ~/Library/LaunchAgents/com.somnora.tally.weekly.plist
+
+  Check it ran:
+    ls -lt ~/.tally-logs | head
+
+  Sunday 04:17 local. Not on the hour and not at 04:00, because every
+  scheduled job in the world fires on the hour and the FEC and Congress.gov
+  are nicer to a caller that does not join the stampede.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.somnora.tally.weekly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <!-- Login shell so uv, psql, git and gh resolve the same way they do
+         interactively; launchd's default PATH is too bare to run any of it. -->
+    <string>cd "$HOME/Desktop/Tally" &amp;&amp; ./scripts/weekly_refresh.sh</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>0</integer>
+    <key>Hour</key><integer>4</integer>
+    <key>Minute</key><integer>17</integer>
+  </dict>
+
+  <!-- The run takes tens of minutes of mostly-waiting on polite HTTP, so it
+       must not be treated as a crashed job and restarted. -->
+  <key>KeepAlive</key><false/>
+  <key>RunAtLoad</key><false/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/tally-weekly.out</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/tally-weekly.err</string>
+</dict>
+</plist>

@@ -102,3 +102,33 @@ Campaign finance data: Federal Election Commission. Legislative data:
 Congress.gov. Donor industry classification: OpenSecrets, under their bulk
 data license. Member IDs: the unitedstates/congress-legislators project.
 Ideology scores: Voteview.
+
+## Running it
+
+Two halves, split by whether a step needs a GPU or a judgment.
+
+**Weekly, automated, free.** `scripts/weekly_refresh.sh` refreshes FEC finance,
+Congress.gov roll calls and members' official sites, screens any new promises
+through the selectivity gate, rebuilds the snapshot and page, and publishes.
+Every step is either an API call or polite crawling. Schedule it with
+`scripts/com.somnora.tally.weekly.plist` (not installed by default: loading it
+makes the machine publish to a public site unattended, which should be a
+deliberate choice). A run reports how many documents are waiting for
+extraction, which is the prompt for the other half.
+
+**Manual, deliberate, costs money.** Extraction and evaluation need a rented
+GPU serving a local model:
+
+```
+scripts/gpu_serve.sh                              # on the instance
+ssh -f -N -L 8801:127.0.0.1:8000 ubuntu@<ip>      # from here
+uv run python -m pipeline.workflows extract       # documents -> promises
+uv run python -m pipeline.gate_cli --apply        # screen them
+uv run python -m pipeline.evaluate_cli --all      # promises vs votes
+```
+
+Evaluation stays manual for a second reason beyond cost. Its most consequential
+output is the finding that a member broke a promise, which cannot publish
+without a human signature, and on the most recent triage roughly nine in ten of
+those should never publish at all. Scheduling it would spend money to grow a
+review queue nobody is reading.

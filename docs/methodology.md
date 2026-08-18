@@ -201,12 +201,20 @@ The app loads a published data snapshot with a version stamp, and the "data
 as of" date is always visible in the app. That date, not this section, is the
 authoritative answer to how current what you are reading is.
 
-Our intended cadence is weekly: campaign finance following the FEC bulk data
-publication schedule, and votes and documents once per candidate per week
-during the cycle. We are not there yet. Updates currently run when we run
-them, which is why the snapshot date is displayed rather than a promise of
-freshness. This section will say "automated, weekly" when that is true and
-not before.
+Our cadence is weekly for the parts that can be automated safely, and manual
+for the parts that cannot.
+
+Automated, weekly: campaign finance from the FEC, roll-call votes from
+Congress.gov, a fresh read of members' official websites, and the rebuild and
+republish of the site. This is the data that goes stale, and none of it
+requires a judgment call.
+
+Deliberately manual: reading new documents for promises, and assessing
+promises against voting records. Both need a rented GPU, so automating them
+would mean spending money unattended, and the second produces the one kind of
+finding we will not publish without a person reading it. Those runs happen
+when someone decides to do them, and the site always shows the date of the
+data you are looking at.
 
 ## Finding your district, and what happens to your address
 
