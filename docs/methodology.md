@@ -333,6 +333,39 @@ rather than a normal data request. That is a deliberate trust in a US
 government domain over HTTPS, and it is the only external service the page
 talks to.
 
+## When a member runs for a different seat
+
+The FEC issues a candidate a new identifier for each office they seek, and
+nothing in the published data joins the two. A sitting House member running
+for the Senate therefore appears twice, and their voting record sits under
+the identifier they are no longer campaigning under. Fourteen candidates were
+in that position here, and their Senate pages showed sitting members of
+Congress with no record and no promises, as though we had never heard of
+them.
+
+We join those identities, and the standard for doing so is deliberately
+high, because the failure mode is one member's votes appearing on another
+member's page. Two independent things must agree.
+
+The FEC's own candidate master has to list both identifiers with a
+character-for-character identical filed name, the same state, and the same
+party, across two different offices, with exactly one marked as an incumbent.
+That is a single source in a single format, self-reported by the candidate.
+We do not match names across two different systems, which is guesswork
+dressed as evidence, and we do not match on surnames: Ohio has had a Sherrod
+Brown and a Shontel Brown at once.
+
+Then our own database has to agree independently, because the FEC's
+incumbency marker is self-declared and stale filings carry it. The
+incumbent-side identifier must resolve to a member we hold a real roll-call
+record for, and the other side must have none.
+
+Anything that fails either test is left alone rather than guessed at. On the
+current data that reduced twenty-nine name matches to fourteen links, and a
+hundred and five ambiguous groups were never candidates for it. Every link we
+make is stored with the evidence for it and the superseded identity is kept,
+so any one of them can be checked or undone.
+
 ## Coverage, and what is missing
 
 Coverage is uneven, and the app says so per candidate rather than leaving you

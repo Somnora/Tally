@@ -320,6 +320,62 @@ def state_candidacies(conn: Connection, state: str, cycle: int) -> list[Candidac
     ]
 
 
+@dataclass(frozen=True)
+class IdentityPair:
+    """Our own evidence about a candidate-identity pair the FEC proposed."""
+
+    incumbent_politician_id: int
+    other_politician_id: int
+    incumbent_bioguide: str | None
+    incumbent_votes: int
+    other_votes: int
+    already_linked: bool
+
+
+def resolve_identity_pair(
+    conn: Connection, incumbent_fec_id: str, other_fec_id: str, cycle: int
+) -> IdentityPair | None:
+    """None when either id has no candidacy here, or both resolve to one person."""
+    row = conn.execute(load_sql("resolve_identity_pair"), {
+        "incumbent_fec_id": incumbent_fec_id, "other_fec_id": other_fec_id,
+        "cycle": cycle,
+    }).fetchone()
+    if row is None:
+        return None
+    return IdentityPair(
+        incumbent_politician_id=int(row[0]), other_politician_id=int(row[1]),
+        incumbent_bioguide=row[2], incumbent_votes=int(row[3]),
+        other_votes=int(row[4]), already_linked=bool(row[5]),
+    )
+
+
+def apply_identity_link(
+    conn: Connection, *, incumbent_fec_id: str, other_fec_id: str,
+    politician_id: int, superseded_politician_id: int, basis: str,
+    source_id: int, cycle: int,
+) -> tuple[int, int]:
+    """Record the link, then move the candidacy and its money onto the person.
+
+    The superseded politician row is left in place. It cost nothing to keep
+    and it is what makes this reversible, which matters for an edit whose
+    failure mode is one member's votes appearing under another member's name.
+    """
+    conn.execute(load_sql("identity_link_insert"), {
+        "incumbent_fec_id": incumbent_fec_id, "other_fec_id": other_fec_id,
+        "politician_id": politician_id,
+        "superseded_politician_id": superseded_politician_id,
+        "basis": basis, "source_id": source_id,
+    })
+    params = {"politician_id": politician_id, "other_fec_id": other_fec_id,
+              "cycle": cycle}
+    candidacies = conn.execute(
+        load_sql("identity_link_repoint_candidacy"), params).rowcount
+    donations = conn.execute(
+        load_sql("identity_link_repoint_donations"),
+        {"politician_id": politician_id, "other_fec_id": other_fec_id}).rowcount
+    return candidacies, donations
+
+
 def state_committee_map(conn: Connection, state: str, cycle: int) -> dict[str, str]:
     """cmte_id -> fec_candidate_id for a state's candidates (indiv-file filter).
 
