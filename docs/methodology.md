@@ -102,14 +102,32 @@ report, and the remainder is mostly contributions filed since our last bulk
 load. Each candidate shows their own figure rather than this average, because
 the spread is wide.
 
-One limitation is worth naming precisely, because it bears on the question
-this section exists to answer. Where a contribution was bundled through a
-conduit, the filing says so, and we can see how much of a candidate's money
-arrived that way. It does not name the bundler in the same record, and we do
-not yet read the field that identifies them. So we can currently tell you
-that a candidate received bundled money, and not who organised it. That is a
-real gap in exactly the place where organised giving is most visible, and
-closing it is the next thing we intend to do here.
+### Bundling, and why we name it separately
+
+There are three ways money reaches a candidate, and a donor list shows only
+one of them.
+
+A committee can give directly, capped at $5,000 per election. A group can
+spend independently for or against the candidate, uncapped, which we cover
+above. And an organisation can bundle: it asks many individuals to give,
+collects their contributions, and delivers them together. Every one of those
+gifts is an individual's own and stays within the individual limit, so
+nothing about it is irregular, but the organisation that assembled them
+directs a total far larger than any single limit and appears nowhere in a
+donor list, because it never donated.
+
+The filings identify the collecting committee, so we name it. Each candidate
+shows the organisations that bundled contributions to them, how much arrived
+that way and across how many gifts, each linked to its FEC record. The count
+matters as much as the total: an organisation routing $400,000 across nine
+hundred contributions is doing something different from one routing it across
+three.
+
+This is stated as a channel, not an allegation. Bundling is lawful, disclosed
+and ordinary, and it is treated identically for every candidate. We report it
+because a reader asking who is behind a campaign is asking about exactly this,
+and answering with only the capped committee donations would be a technically
+accurate reply to a question nobody asked.
 
 We measure that gap on individual contributions alone, and it is worth saying
 why, because the first version of this measure was wrong. Combining committee

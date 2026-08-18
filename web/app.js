@@ -2,7 +2,7 @@ const DATA = window.__TALLY__;
 
 /* Bulk tables arrive column-wise to keep the download small; rehydrate them
    into plain objects once, so every render function below reads normally. */
-for(const name of ['candidates','finance','donors','spenders','votes','topics','record']){
+for(const name of ['candidates','finance','donors','spenders','conduits','votes','topics','record']){
   const t = DATA[name];
   if(t && !Array.isArray(t)){
     DATA[name] = t.rows.map(r => {
@@ -104,7 +104,7 @@ function renderRace(){
       ${outsideMoney(f, c)}
       ${donors.length?`<div class="donors"><h4>Largest committee donors</h4>${donors.map(d=>
         `<div class="donor"><span>${esc(d.committee_name||'')}</span><span>${usd(d.total_amount)}</span></div>`
-      ).join('')}<p class="donor-note">A political action committee may give a
+      ).join('')}${bundled(c)}<p class="donor-note">A political action committee may give a
         candidate $5,000 per election, so $10,000 across a primary and a
         general. Party committees and a candidate&rsquo;s own affiliated
         committees follow different rules and can appear here for more.</p>${coverage(f)}</div>`:''}
@@ -298,6 +298,28 @@ function outsideMoney(f, c){
     <p class="out-note">Spent independently by other groups, not by the campaign,
       and not subject to contribution limits. Largest spenders shown; each links
       to its FEC record.</p></div>`;
+}
+
+/* Bundling: individuals give the money, an organisation collects and
+   delivers it together. Every underlying contribution is capped and legal,
+   and the organisation directing them is not named anywhere in a donor list,
+   because it never donated. This is the channel organised giving mostly
+   uses, so leaving it out while naming $10,000 committee donors would
+   understate exactly the relationship a reader came to check. */
+function bundled(c){
+  const rows = byId(DATA.conduits,'candidacy_id',c.candidacy_id)
+    .sort((a,b)=>a.conduit_rank-b.conduit_rank);
+  if(!rows.length) return '';
+  return `<div class="bundle"><h4>Bundled through</h4>${rows.map(b=>
+    `<a class="bd" href="https://www.fec.gov/data/committee/${esc(b.conduit_cmte_id)}/"
+        target="_blank" rel="noopener">
+       <span class="bd-n">${esc(b.conduit_name||'')}</span>
+       <span class="bd-c">${Number(b.contribution_count).toLocaleString('en-US')}
+         gift${Number(b.contribution_count)===1?'':'s'}</span>
+       <span class="bd-a">${usd(b.total_amount)}</span>
+     </a>`).join('')}
+    <p class="out-note">Given by individuals, collected and passed on by these
+      groups. Not a donation from the group, and not outside spending.</p></div>`;
 }
 
 /* How much of this campaign's individual contributions we actually hold.

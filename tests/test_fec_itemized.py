@@ -210,3 +210,51 @@ def test_a_redesignated_committee_maps_to_the_seat_its_owner_is_running_for(
     assert mapping["C00000021"] == "S6ME00002", (
         "money went to the seat its owner is no longer running for"
     )
+
+
+def test_a_conduit_is_recorded_as_the_router_not_the_donor() -> None:
+    """OTHER_ID names who passed the money on, not who gave it.
+
+    Writing it into contributor_cmte_id would sweep every conduit into the
+    top-donor rollup as though it had donated, inventing large committee
+    donors out of money those committees never gave, and double counting it
+    against the individuals who actually gave it. Separate roles, separate
+    columns.
+    """
+    ctx = StateContext(
+        cycle=2026,
+        politician_by_fec={"S6ME00001": 7},
+        cand_by_cmte={"C00000001": "S6ME00001"},
+        known_committees={"C00000001", "C00999999"},
+    )
+    row = {
+        "CMTE_ID": "C00000001", "SUB_ID": "4111120261234567890",
+        "NAME": "SMITH, ALEX", "TRANSACTION_AMT": "500",
+        "TRANSACTION_TP": "15E", "ENTITY_TP": "IND",
+        "TRANSACTION_DT": "03012026", "OTHER_ID": "C00999999",
+        "MEMO_TEXT": "* EARMARKED CONTRIBUTION: SEE BELOW",
+    }
+    donation = indiv_row_to_donation(row, ctx, source_id=1, stats={"bad_amount": 0})
+    assert donation is not None
+    assert donation["conduit_cmte_id"] == "C00999999"
+    assert donation["contributor_cmte_id"] is None, (
+        "the conduit must never occupy the donor field"
+    )
+    assert donation["contributor_name"] == "SMITH, ALEX"
+
+
+def test_an_unknown_conduit_is_dropped_rather_than_stored_dangling() -> None:
+    ctx = StateContext(
+        cycle=2026, politician_by_fec={"S6ME00001": 7},
+        cand_by_cmte={"C00000001": "S6ME00001"},
+        known_committees={"C00000001"},   # the conduit is NOT in the master
+    )
+    row = {
+        "CMTE_ID": "C00000001", "SUB_ID": "4111120261234567891",
+        "NAME": "SMITH, ALEX", "TRANSACTION_AMT": "500",
+        "TRANSACTION_TP": "15E", "ENTITY_TP": "IND",
+        "TRANSACTION_DT": "03012026", "OTHER_ID": "C00404040",
+    }
+    donation = indiv_row_to_donation(row, ctx, source_id=1, stats={"bad_amount": 0})
+    assert donation is not None
+    assert donation["conduit_cmte_id"] is None

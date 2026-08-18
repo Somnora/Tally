@@ -114,6 +114,12 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         FROM outside_spenders WHERE spender_rank <= 4""")
     for row in spenders:
         row["total_amount"] = round(float(row["total_amount"] or 0))
+    conduits = _rows(con, """
+        SELECT candidacy_id, conduit_cmte_id, conduit_name, contribution_count,
+               total_amount, conduit_rank
+        FROM conduits WHERE conduit_rank <= 4""")
+    for row in conduits:
+        row["total_amount"] = round(float(row["total_amount"] or 0))
     # An incumbent's own voting record. Restricted to people actually shown,
     # so members who are not on this year's ballot cost the reader nothing.
     on_page = {c["politician_id"] for c in candidates}
@@ -135,6 +141,7 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         "finance": finance,
         "donors": donors,
         "spenders": spenders,
+        "conduits": conduits,
         "promises": _rows(con, "SELECT * FROM promises"),
         # Normalised: 21,711 promise-vote rows referenced only 244 distinct
         # bills, so carrying each bill's title and summary inline repeated the
@@ -174,8 +181,8 @@ def build() -> Path:
     # "pac_contributions_official" across 2,730 rows costs 76 KB in key names
     # alone, and the reader downloads every byte. app.js rehydrates them into
     # ordinary objects at load, so nothing downstream knows the difference.
-    for name in ("candidates", "finance", "donors", "spenders", "votes",
-                 "topics", "record"):
+    for name in ("candidates", "finance", "donors", "spenders", "conduits",
+                 "votes", "topics", "record"):
         rows = payload[name]
         if not rows:
             payload[name] = {"cols": [], "rows": []}

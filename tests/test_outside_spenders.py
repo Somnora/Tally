@@ -251,3 +251,34 @@ def test_coverage_is_zero_not_absent_when_we_hold_nothing(
     _totals(conn, politician_id, source_id)
     db.refresh_finance_views(conn)
     assert int(_finance_export(conn)["individual_itemized_loaded"]) == 0
+
+
+def test_a_conduit_that_nets_to_nothing_is_not_shown_as_having_bundled(
+    conn: db.Connection,
+) -> None:
+    """Receipt lines can be negative when a contribution is reattributed or
+    corrected. One real conduit nets below zero, and "bundled -$1,606" is
+    arithmetically right and communicatively useless: on net that
+    organisation routed nothing, so it is not listed as having routed
+    something."""
+    politician_id, source_id = _seed_candidate(conn)
+    _committee(conn, source_id, "C00000031", "Refunded Conduit")
+    _committee(conn, source_id, "C00000032", "Real Conduit")
+    db.upsert_donations_bulk(conn, [
+        _donation_row(politician_id, source_id, fec_sub_id="4020260501",
+                      contributor_cmte_id=None, contributor_name="SMITH, ALEX",
+                      transaction_tp="15E", entity_tp="IND", amount=500,
+                      conduit_cmte_id="C00000031"),
+        _donation_row(politician_id, source_id, fec_sub_id="4020260502",
+                      contributor_cmte_id=None, contributor_name="SMITH, ALEX",
+                      transaction_tp="15E", entity_tp="IND", amount=-500,
+                      conduit_cmte_id="C00000031"),
+        _donation_row(politician_id, source_id, fec_sub_id="4020260503",
+                      contributor_cmte_id=None, contributor_name="ROE, SAM",
+                      transaction_tp="15E", entity_tp="IND", amount=900,
+                      conduit_cmte_id="C00000032"),
+    ])
+    db.refresh_finance_views(conn)
+    cur = conn.execute(db.load_sql("export_conduits"))
+    names = [str(r[2]) for r in cur.fetchall()]
+    assert names == ["Real Conduit"], f"got {names}"

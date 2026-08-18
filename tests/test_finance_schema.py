@@ -44,6 +44,7 @@ def _donation_row(politician_id: int, source_id: int, **overrides: Any) -> dict[
         "politician_id": politician_id,
         "contributor_name": "Example PAC",
         "contributor_cmte_id": "C00000002",
+        "conduit_cmte_id": None,
         "amount": 5000,
         "contributed_at": "2026-03-01",
         "cycle": 2026,

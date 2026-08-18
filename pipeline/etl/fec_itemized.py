@@ -109,6 +109,7 @@ def pas2_row_to_donation(
         "politician_id": politician_id,
         "contributor_name": None,           # donor is the committee (see module note)
         "contributor_cmte_id": contributor_cmte or None,
+        "conduit_cmte_id": None,       # pas2 has no conduit concept
         "amount": amount,
         "contributed_at": parse_fec_date(row.get("TRANSACTION_DT", "")),
         "cycle": ctx.cycle,
@@ -135,6 +136,12 @@ def indiv_row_to_donation(
     cand_id = ctx.cand_by_cmte.get(recipient_cmte)
     if cand_id is None:
         return None
+    # Guarded against the committee master, same as every other committee
+    # reference here: an id we cannot resolve is dropped rather than stored
+    # as a dangling foreign key.
+    conduit = row.get("OTHER_ID", "").strip()
+    if conduit not in ctx.known_committees:
+        conduit = ""
     amount = parse_amount(row.get("TRANSACTION_AMT", ""))
     if amount is None:
         stats["bad_amount"] += 1
@@ -147,6 +154,10 @@ def indiv_row_to_donation(
         "politician_id": ctx.politician_by_fec[cand_id],
         "contributor_name": row.get("NAME", "").strip() or None,
         "contributor_cmte_id": None,
+        # OTHER_ID on an earmarked receipt is the committee that collected
+        # this money and passed it on. Kept in its own role: the individual
+        # named above is the contributor, this is only who routed it.
+        "conduit_cmte_id": conduit or None,
         "amount": amount,
         "contributed_at": parse_fec_date(row.get("TRANSACTION_DT", "")),
         "cycle": ctx.cycle,

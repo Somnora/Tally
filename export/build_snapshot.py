@@ -95,6 +95,11 @@ TABLES: tuple[TableSpec, ...] = (
     # unattributed total.
     TableSpec("outside_spenders", "export_outside_spenders", (),
               ("candidacy_id",)),
+    # The organisations that bundled individual contributions. A third
+    # channel, distinct from both committee contributions and independent
+    # expenditure, and the one organised giving mostly runs through.
+    TableSpec("conduits", "export_conduits", (),
+              ("candidacy_id",)),
     TableSpec("promises", "export_promises", ("context_chars",),
               ("politician_id", "topic")),
     # The votes beside a promise, carrying no verdict. This is what the app
