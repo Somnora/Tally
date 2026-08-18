@@ -457,3 +457,35 @@ def test_a_rejected_broken_verdict_stays_withdrawn(conn: db.Connection) -> None:
         (int(row[0]),)
     ).fetchone()
     assert kept is not None and kept[0] == "cited vote is a repeal"
+
+
+def test_invented_bill_number_in_prose_keeps_a_verdict_unpublished(
+    conn: db.Connection,
+) -> None:
+    """Citations were always validated; the sentence never was, and it is what
+    a reader actually reads. Ten verdicts reached the public site naming bills
+    like "HR-322423" while their citations validated perfectly."""
+    politician_id, promise_id = _seed(conn)
+    vote_id = _substantive_vote_id(conn, politician_id)
+    _run(conn, politician_id, {
+        "status": "in_progress", "consistency_score": 60,
+        "llm_reasoning": "The legislator voted yea on HR-322423, which helps.",
+        "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
+                      "bill_effect": "reverses"}],
+    })
+    assert _stored(conn, promise_id)[2] is False, "invented bill number must not be current"
+    assert _exported(conn, promise_id) == 0
+
+
+def test_model_scratchpad_in_prose_keeps_a_verdict_unpublished(
+    conn: db.Connection,
+) -> None:
+    politician_id, promise_id = _seed(conn)
+    vote_id = _substantive_vote_id(conn, politician_id)
+    _run(conn, politician_id, {
+        "status": "in_progress", "consistency_score": 60,
+        "llm_reasoning": "Vote 1: nay. Wait, let me re-check the votes. Let's say 75.",
+        "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
+                      "bill_effect": "reverses"}],
+    })
+    assert _stored(conn, promise_id)[2] is False, "scratchpad must not be current"

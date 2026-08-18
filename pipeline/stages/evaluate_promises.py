@@ -295,6 +295,19 @@ def evaluate_promise(
     )
     coherent, coherence_reason = evidence.status_is_supported(result.status, checks)
 
+    # The sentence gets the same treatment as the citations. Ten verdicts
+    # reached the public site naming bills like "HR-322423", and one published
+    # the model's scratchpad, all of them sitting on citations that validated
+    # perfectly. Valid evidence under invented prose is still a false statement
+    # about a named person.
+    cited_bill_keys = frozenset(
+        facts[c.record_id].bill_key or ""
+        for c in claims if c.record_id in facts and facts[c.record_id].bill_key
+    )
+    prose_defects = evidence.reasoning_defects(result.llm_reasoning, cited_bill_keys)
+    for defect in prose_defects:
+        stats[f"reasoning_{defect}"] += 1
+
     for check in checks:
         stats[f"citation_{check.reason}"] += 1
     rejected = [c for c in checks if not c.accepted]
@@ -310,7 +323,7 @@ def evaluate_promise(
         stats["evaluations_validated"] += 1
 
     _store(conn, promise, result, checks, model_name,
-           is_current=coherent and not rejected, stats=stats)
+           is_current=coherent and not rejected and not prose_defects, stats=stats)
 
 
 def _store(

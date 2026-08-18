@@ -48,6 +48,7 @@ The caller stores a failing evaluation with is_current = FALSE so it is kept
 for review but can never reach the export view.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -91,6 +92,61 @@ DIRECTION_BY_EFFECT: dict[tuple[str, str], str] = {
 def direction_for(position: str, bill_effect: str) -> str:
     """Derive a citation's direction. Anything unclear stays contextual."""
     return DIRECTION_BY_EFFECT.get((position, bill_effect), "contextual")
+
+
+# -- the prose itself -----------------------------------------------------------
+#
+# Citations were validated from the first version; the SENTENCE never was, and
+# it is the only part most readers will actually read. Live on the public site
+# tonight, before this existed: ten verdicts naming bills like "HR-322423" and
+# "HR-193019", which are not bill numbers any Congress has issued, and one that
+# published the model's scratchpad verbatim, ending "Maybe 70-75. Let's say
+# 75." Every one of those had perfectly valid citations underneath.
+#
+# So the reasoning is now checked the same way a citation is: against the
+# record, mechanically, before it can be current.
+
+# House and Senate bill numbers are at most four digits in practice; five or
+# more is invented. Matched loosely on purpose, since the model writes them
+# several ways.
+_BILL_IN_PROSE = re.compile(r"\b(?:H\.?\s?R\.?|S\.?|HJ\s?RES|HR|HRES|SRES)[\s.-]?(\d{3,})\b", re.I)
+
+# Markers of a model reasoning aloud rather than reporting a finding.
+_SCRATCHPAD = re.compile(
+    r"(wait,|let me re-?check|let me re-?evaluate|let'?s say|on second thought"
+    r"|I need to reconsider|re-?reading:|hmm\b|actually,\s+(?:I|let))", re.I)
+
+# The prompt asks for two to four sentences. Well past that is a sign the model
+# narrated its whole pass instead of reporting a conclusion.
+MAX_REASONING_CHARS = 1200
+
+
+def reasoning_defects(reasoning: str, cited_bill_keys: frozenset[str]) -> list[str]:
+    """Mechanical defects in a verdict's published prose, or an empty list.
+
+    cited_bill_keys is what the evaluation actually cites, normalised like
+    "HR-4758". A bill named in the sentence but absent from the citations is
+    either invented or uncheckable, and both are disqualifying: a reader who
+    follows it finds nothing.
+    """
+    defects: list[str] = []
+    text = reasoning or ""
+    if not text.strip():
+        return ["empty"]
+    if len(text) > MAX_REASONING_CHARS:
+        defects.append("overlong")
+    if _SCRATCHPAD.search(text):
+        defects.append("scratchpad")
+    cited_numbers = {key.split("-")[-1] for key in cited_bill_keys}
+    for match in _BILL_IN_PROSE.finditer(text):
+        number = match.group(1).lstrip("0")
+        if len(number) >= 5:
+            defects.append("impossible_bill_number")
+            break
+        if cited_numbers and number not in cited_numbers:
+            defects.append("uncited_bill_reference")
+            break
+    return defects
 
 
 # -- contested subjects --------------------------------------------------------
