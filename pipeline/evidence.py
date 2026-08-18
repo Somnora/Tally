@@ -66,6 +66,75 @@ UNEVIDENCED_STATUSES = frozenset({"pending", "unverifiable"})
 # Records that can supply context but must never carry a verdict's weight.
 CONTEXTUAL_ONLY_KINDS = frozenset({"donation", "lobbying_filing"})
 
+# -- vote polarity -------------------------------------------------------------
+#
+# THE BUG THIS EXISTS TO MAKE IMPOSSIBLE. evaluate_v3 asked the model for the
+# direction of a citation directly, and it got it backwards at scale: 483
+# citations in the broken class read "voted nay -> contradicts" regardless of
+# what the bill did. Its own reasoning on one of them said the resolutions
+# "would have nullified rules restricting coal leasing, thereby supporting
+# increased fossil fuel development" and then scored a climate promise BROKEN
+# for voting against them. It understood the bill and still inverted the vote.
+#
+# So the model no longer states the direction. It states what PASSING the bill
+# would have done to the promise, which is a reading task it is good at, and
+# code does the boolean, which is the part it kept failing. An inversion of
+# this kind is now unrepresentable rather than merely discouraged.
+DIRECTION_BY_EFFECT: dict[tuple[str, str], str] = {
+    ("yea", "advances"): "supports",
+    ("yea", "reverses"): "contradicts",
+    ("nay", "advances"): "contradicts",   # voting down what would have helped
+    ("nay", "reverses"): "supports",      # voting down a repeal protects it
+}
+
+
+def direction_for(position: str, bill_effect: str) -> str:
+    """Derive a citation's direction. Anything unclear stays contextual."""
+    return DIRECTION_BY_EFFECT.get((position, bill_effect), "contextual")
+
+
+# -- contested subjects --------------------------------------------------------
+#
+# Invariant 4 is neutrality, and evaluate_v3 broke it in a way no amount of
+# prompt wording would fix: it scored promises against votes on contested
+# social questions the promise never raised. A promise to "stand up for women"
+# was marked broken over a vote on Medicaid coverage for gender transition.
+# Deciding that one implies the other is a political judgment, and this project
+# does not get to make it on a named person's behalf.
+#
+# So a vote whose bill carries one of these subjects may only ever be cited as
+# CONTEXT, unless the promise itself is about that subject. The mapping is the
+# whole editorial content of the rule and is deliberately narrow: the promise
+# has to be on the topic, not merely adjacent to it.
+CONTESTED_SUBJECT_TOPICS: dict[str, frozenset[str]] = {
+    "Abortion": frozenset({"abortion", "reproductive rights", "reproductive_choice"}),
+    "Sex and reproductive health": frozenset({"abortion", "reproductive rights",
+                                              "reproductive_choice"}),
+    "Sex, gender, sexual orientation discrimination": frozenset(
+        {"lgbtq", "lgbtq_rights", "civil_rights", "equality", "gender_equality",
+         "womens_rights"}),
+    "Religion": frozenset(),          # no promise topic scores a religion vote
+    "Firearms and explosives": frozenset({"guns", "gun_violence", "gun violence",
+                                          "gun_safety"}),
+    "Immigration status and procedures": frozenset(
+        {"immigration", "border_security", "border"}),
+    "Racial and ethnic relations": frozenset({"civil_rights", "racial_justice"}),
+}
+
+
+def contested_block(subjects: frozenset[str], promise_topic: str) -> str | None:
+    """The contested subject that bars scoring this vote, if any.
+
+    Returns the subject name when the bill raises a contested question the
+    promise does not, and None when scoring is allowed.
+    """
+    topic = (promise_topic or "").strip().lower()
+    for subject in sorted(subjects):
+        allowed = CONTESTED_SUBJECT_TOPICS.get(subject)
+        if allowed is not None and topic not in allowed:
+            return subject
+    return None
+
 
 @dataclass(frozen=True)
 class ClaimedEvidence:
@@ -95,6 +164,7 @@ class VoteFact:
     bill_key: str | None
     is_omnibus: bool
     is_procedural: bool
+    subjects: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -136,6 +206,7 @@ def check_citation(
     politician_id: int,
     vote_facts: dict[int, VoteFact],
     offered_vote_ids: frozenset[int] | None = None,
+    promise_topic: str = "",
 ) -> CitationCheck:
     """Test one citation against the facts. Never raises; every rejection
     carries a reason so a bad prompt is diagnosable from the stats alone.
@@ -176,6 +247,10 @@ def check_citation(
         return CitationCheck(claim, False, "omnibus_not_contextual")
     if fact.is_procedural and claim.direction != "contextual":
         return CitationCheck(claim, False, "procedural_not_contextual")
+    if claim.direction != "contextual":
+        blocked = contested_block(fact.subjects, promise_topic)
+        if blocked is not None:
+            return CitationCheck(claim, False, "contested_subject_not_contextual")
     return CitationCheck(claim, True, "ok")
 
 
@@ -185,6 +260,7 @@ def check_citations(
     politician_id: int,
     vote_facts: dict[int, VoteFact],
     offered_vote_ids: frozenset[int] | None = None,
+    promise_topic: str = "",
 ) -> list[CitationCheck]:
     """Check every citation, dropping exact duplicates.
 
@@ -202,7 +278,7 @@ def check_citations(
         checks.append(
             check_citation(
                 claim, politician_id=politician_id, vote_facts=vote_facts,
-                offered_vote_ids=offered_vote_ids,
+                offered_vote_ids=offered_vote_ids, promise_topic=promise_topic,
             )
         )
     return checks

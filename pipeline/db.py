@@ -855,6 +855,7 @@ def vote_facts(conn: Connection, vote_ids: list[int]) -> dict[int, evidence.Vote
             vote_id=int(r[0]), politician_id=int(r[1]), position=str(r[2]),
             vote_question=str(r[3]), bill_key=r[4],
             is_omnibus=bool(r[5]), is_procedural=bool(r[6]),
+            subjects=frozenset(str(x) for x in cast(list[Any], r[7] or [])),
         )
         for r in rows
     }
@@ -934,6 +935,7 @@ class StoredCitation:
     politician_id: int
     status: str
     is_current: bool
+    promise_topic: str = ""
 
 
 def evidence_for_revalidation(conn: Connection) -> list[StoredCitation]:
@@ -943,10 +945,35 @@ def evidence_for_revalidation(conn: Connection) -> list[StoredCitation]:
             evidence_id=int(r[0]), evaluation_id=int(r[1]), kind=str(r[2]),
             vote_id=None if r[3] is None else int(r[3]), direction=str(r[4]),
             validated=bool(r[5]), politician_id=int(r[6]), status=str(r[7]),
-            is_current=bool(r[8]),
+            is_current=bool(r[8]), promise_topic=str(r[9] or ""),
         )
         for r in rows
     ]
+
+
+def evaluations_awaiting_review(conn: Connection) -> list[dict[str, Any]]:
+    """Broken verdicts with no signature, with everything needed to judge one."""
+    rows = conn.execute(load_sql("select_evaluations_awaiting_review")).fetchall()
+    return [
+        {
+            "evaluation_id": int(r[0]), "politician": str(r[1]), "topic": str(r[2]),
+            "quote": str(r[3]), "score": r[4], "reasoning": str(r[5]),
+            "citations": cast(list[dict[str, Any]], r[6] or []),
+        }
+        for r in rows
+    ]
+
+
+def record_evaluation_review(
+    conn: Connection, *, evaluation_id: int, approved: bool,
+    reviewed_by: str, review_note: str | None = None,
+) -> None:
+    """Sign off or reject. A rejection keeps the row and drops it from export."""
+    conn.execute(
+        load_sql("evaluation_record_review"),
+        {"evaluation_id": evaluation_id, "approved": approved,
+         "reviewed_by": reviewed_by, "review_note": review_note},
+    )
 
 
 def set_evidence_validated(conn: Connection, evidence_id: int, validated: bool) -> None:

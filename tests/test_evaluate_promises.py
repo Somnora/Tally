@@ -9,6 +9,7 @@ let it.
 """
 
 from typing import Any
+from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -16,6 +17,7 @@ from pydantic_ai.models.test import TestModel
 
 from pipeline import db
 from pipeline.promise_gate import GATE_VERSION, screen_promise
+from pipeline.stages import evaluate_promises as ep
 from pipeline.stages.evaluate_promises import (
     PROMPT_VERSION,
     QUARANTINED_PROMPT_VERSIONS,
@@ -120,6 +122,24 @@ def _stored(conn: db.Connection, promise_id: int) -> tuple[str, int | None, bool
     return str(row[0]), row[1], bool(row[2])
 
 
+def _sign_off(conn: db.Connection, promise_id: int) -> None:
+    """Approve every broken verdict on this promise.
+
+    Broken verdicts do not publish without a human signature (migration 0018),
+    so a test asserting one exports has to say who approved it. Tests that
+    forget will fail, which is the gate working rather than a nuisance.
+    """
+    rows = conn.execute(
+        "SELECT evaluation_id FROM promise_evaluations "
+        "WHERE promise_id = %s AND status = 'broken' AND is_current", (promise_id,)
+    ).fetchall()
+    for (evaluation_id,) in rows:
+        db.record_evaluation_review(
+            conn, evaluation_id=int(evaluation_id), approved=True,
+            reviewed_by="test-reviewer", review_note=None,
+        )
+
+
 def _exported(conn: db.Connection, promise_id: int) -> int:
     cur = conn.execute(
         "SELECT count(*) FROM app_export_evaluations WHERE promise_id = %s", (promise_id,)
@@ -146,12 +166,16 @@ def test_a_quarantined_prompt_version_cannot_be_run_in_production() -> None:
     next --all run regenerate them. The refusal has to live where the agent is
     built, because that is the one place a run cannot skip.
     """
-    assert PROMPT_VERSION in QUARANTINED_PROMPT_VERSIONS, (
-        "if PROMPT_VERSION has moved past the quarantined version, update this "
-        "test rather than deleting it: the next withdrawal will need it"
-    )
-    with pytest.raises(RuntimeError, match="quarantined"):
-        build_agent()
+    assert QUARANTINED_PROMPT_VERSIONS, "the quarantine set must never be emptied"
+    # PROMPT_VERSION has moved on to v4, so the guard is exercised against a
+    # withdrawn version directly rather than by breaking the live one.
+    with patch.object(ep, "PROMPT_VERSION", next(iter(QUARANTINED_PROMPT_VERSIONS))):
+        with pytest.raises(RuntimeError, match="quarantined"):
+            build_agent()
+
+
+def test_the_live_prompt_version_is_not_quarantined() -> None:
+    assert PROMPT_VERSION not in QUARANTINED_PROMPT_VERSIONS
 
 
 def test_an_injected_model_still_runs_under_quarantine() -> None:
@@ -244,10 +268,11 @@ def test_valid_citation_is_stored_current_and_exportable(conn: db.Connection) ->
         "status": "broken", "consistency_score": 20,
         "llm_reasoning": "Voted against HR 1181 on passage.",
         "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
-                      "direction": "contradicts"}],
+                      "bill_effect": "advances"}],
     })
     assert stats["evaluations_validated"] == 1
     assert _stored(conn, promise_id) == ("broken", 20, True)
+    _sign_off(conn, promise_id)
     assert _exported(conn, promise_id) == 1
 
 
@@ -259,7 +284,7 @@ def test_invented_vote_id_never_exports(conn: db.Connection) -> None:
         "status": "broken", "consistency_score": 15,
         "llm_reasoning": "Voted against a bill that does not exist.",
         "evidence": [{"kind": "vote", "id": 987654321, "position": "nay",
-                      "direction": "contradicts"}],
+                      "bill_effect": "advances"}],
     })
     assert stats["citation_unknown_record"] == 1
     assert stats["evaluations_failed_validation"] == 1
@@ -292,7 +317,7 @@ def test_real_vote_that_was_never_offered_is_refused(conn: db.Connection) -> Non
         "status": "broken", "consistency_score": 25,
         "llm_reasoning": "Cited a vote that exists but was not supplied.",
         "evidence": [{"kind": "vote", "id": unoffered, "position": "yea",
-                      "direction": "contradicts"}],
+                      "bill_effect": "advances"}],
     })
     assert stats["citation_not_offered"] == 1
     assert _exported(conn, promise_id) == 0, (
@@ -309,7 +334,7 @@ def test_misread_position_is_refused(conn: db.Connection) -> None:
         "status": "completed", "consistency_score": 90,
         "llm_reasoning": "Claimed a yea on a vote the record shows as nay.",
         "evidence": [{"kind": "vote", "id": vote_id, "position": "yea",
-                      "direction": "supports"}],
+                      "bill_effect": "reverses"}],
     })
     assert stats["citation_position_mismatch"] == 1
     assert _exported(conn, promise_id) == 0
@@ -358,7 +383,7 @@ def test_re_evaluation_supersedes_without_destroying_history(conn: db.Connection
         "status": "broken", "consistency_score": 20,
         "llm_reasoning": "First evaluation.",
         "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
-                      "direction": "contradicts"}],
+                      "bill_effect": "advances"}],
     }
     _run(conn, politician_id, good)
     # A promise already evaluated by this model and prompt is not redone.
@@ -389,3 +414,46 @@ def test_promise_reviewed_as_junk_is_never_evaluated(conn: db.Connection) -> Non
     assert db.promises_for_evaluation(
         conn, politician_id, model_name=MODEL, prompt_version=PROMPT_VERSION
     ) == []
+
+
+def test_broken_needs_sign_off_before_it_can_export(conn: db.Connection) -> None:
+    politician_id, promise_id = _seed(conn)
+    vote_id = _substantive_vote_id(conn, politician_id)
+    _run(conn, politician_id, {
+        "status": "broken", "consistency_score": 20,
+        "llm_reasoning": "Voted against a bill that would have advanced it.",
+        "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
+                      "bill_effect": "advances"}],
+    })
+    assert _stored(conn, promise_id)[0] == "broken"
+    assert _exported(conn, promise_id) == 0, "unsigned broken must not publish"
+    _sign_off(conn, promise_id)
+    assert _exported(conn, promise_id) == 1, "a signature releases it"
+
+
+def test_a_rejected_broken_verdict_stays_withdrawn(conn: db.Connection) -> None:
+    """Rejecting keeps the row and the reason, and drops it from the product
+    by the same is_current mechanism that withdrew evaluate_v3 wholesale."""
+    politician_id, promise_id = _seed(conn)
+    vote_id = _substantive_vote_id(conn, politician_id)
+    _run(conn, politician_id, {
+        "status": "broken", "consistency_score": 20,
+        "llm_reasoning": "Voted against a bill that would have advanced it.",
+        "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
+                      "bill_effect": "advances"}],
+    })
+    row = conn.execute(
+        "SELECT evaluation_id FROM promise_evaluations WHERE promise_id = %s",
+        (promise_id,)
+    ).fetchone()
+    assert row is not None
+    db.record_evaluation_review(
+        conn, evaluation_id=int(row[0]), approved=False,
+        reviewed_by="test-reviewer", review_note="cited vote is a repeal",
+    )
+    assert _exported(conn, promise_id) == 0
+    kept = conn.execute(
+        "SELECT review_note FROM promise_evaluations WHERE evaluation_id = %s",
+        (int(row[0]),)
+    ).fetchone()
+    assert kept is not None and kept[0] == "cited vote is a repeal"

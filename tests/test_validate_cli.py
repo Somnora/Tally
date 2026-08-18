@@ -15,6 +15,7 @@ from tests.test_evaluate_promises import (
     _exported,
     _run,
     _seed,
+    _sign_off,
     _substantive_vote_id,
 )
 
@@ -39,8 +40,11 @@ def _seed_live_evaluation(conn: db.Connection) -> tuple[int, int]:
         "status": "broken", "consistency_score": 20,
         "llm_reasoning": "Voted against HR 1181 on passage.",
         "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
-                      "direction": "contradicts"}],
+                      "bill_effect": "advances"}],
     })
+    # Broken verdicts need a signature to publish (migration 0018); this
+    # fixture is about revalidation, so it signs off and moves on.
+    _sign_off(conn, promise_id)
     assert _exported(conn, promise_id) == 1, "precondition: starts exportable"
     return politician_id, promise_id
 
@@ -101,7 +105,7 @@ def test_revalidation_never_promotes(conn: db.Connection) -> None:
         "status": "completed", "consistency_score": 90,
         "llm_reasoning": "Claimed a yea on a vote the record shows as nay.",
         "evidence": [{"kind": "vote", "id": vote_id, "position": "yea",
-                      "direction": "supports"}],
+                      "bill_effect": "reverses"}],
     })
     assert _exported(conn, promise_id) == 0
 

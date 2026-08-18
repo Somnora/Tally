@@ -45,7 +45,13 @@ logger = logging.getLogger(__name__)
 # GENERATION CONFIG changed (thinking disabled, see build_agent) and that
 # changes what the model returns for the same text.
 #
-# v3 fixes a wrong-answer bug rather than a speed one. The vote list showed
+# v4 stops asking the model for the answer it kept getting wrong. It no longer
+# states a citation's direction; it states what passing the bill would do, and
+# code derives direction from that plus the recorded vote. It also cannot score
+# a promise against a contested social question the promise never raised. v3 is
+# quarantined below on both counts.
+#
+# v3 fixed a wrong-answer bug rather than a speed one. The vote list showed
 # only a bill's title, and titles are written to persuade: "Homeowner Energy
 # Freedom Act" repeals home energy efficiency rebates, so the model read a
 # vote protecting those rebates as a vote against them and published a broken
@@ -55,7 +61,7 @@ logger = logging.getLogger(__name__)
 # Reproducibility is the point of stamping a version on a stored evaluation:
 # anything that changes the answer has to move the stamp, or a stored row
 # becomes a claim nobody can reproduce.
-PROMPT_VERSION = "evaluate_v3"
+PROMPT_VERSION = "evaluate_v4"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # Versions whose output was withdrawn and must not be produced again.
@@ -80,6 +86,10 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 # remove v3 from this set to make a run go through.
 QUARANTINED_PROMPT_VERSIONS = frozenset({"evaluate_v3"})
 
+# Statuses that make a public accusation about a named person and therefore do
+# not publish on a model's say-so. See db/migrations/0018.
+REVIEW_REQUIRED_STATUSES = frozenset({"broken"})
+
 # How many votes reach the prompt. Enough to cover a topic, small enough that
 # the model reads all of them rather than skimming.
 MAX_VOTES = 25
@@ -88,12 +98,28 @@ Status = Literal["completed", "in_progress", "broken", "pending", "unverifiable"
 
 
 class EvidenceItem(BaseModel):
+    """One cited vote.
+
+    Note what is ABSENT: the model does not state whether the vote supports or
+    contradicts the promise. It states what PASSING the bill would have done,
+    and code derives the rest. v3 asked for the direction directly and got it
+    backwards 483 times, describing a bill correctly and then inverting the
+    vote on it, so the question is no longer asked.
+    """
+
     kind: Literal["vote"] = "vote"
     id: int = Field(description="A vote_id copied from the supplied list.")
     position: Literal["yea", "nay"] = Field(
         description="The position shown for that vote_id, copied exactly."
     )
-    direction: Literal["supports", "contradicts", "contextual"]
+    bill_effect: Literal["advances", "reverses", "unclear"] = Field(
+        description=(
+            "What PASSING this bill would do to the promise, ignoring how the "
+            "legislator voted. 'advances' if passage moves the promise "
+            "forward, 'reverses' if passage undoes or blocks it, 'unclear' if "
+            "the bill does not bear on the promise or the summary does not say."
+        )
+    )
 
 
 class EvaluationResult(BaseModel):
@@ -250,7 +276,10 @@ def evaluate_promise(
 
     claims = [
         evidence.ClaimedEvidence(
-            kind=item.kind, record_id=item.id, direction=item.direction,
+            kind=item.kind, record_id=item.id,
+            # Derived, never taken from the model. This single line is the
+            # whole of the v3 fix: the inversion is now unrepresentable.
+            direction=evidence.direction_for(item.position, item.bill_effect),
             claimed_position=item.position,
         )
         for item in result.evidence
@@ -260,6 +289,9 @@ def evaluate_promise(
         claims, politician_id=promise.politician_id, vote_facts=facts,
         # Only the votes this promise was actually shown are admissible.
         offered_vote_ids=frozenset(v.vote_id for v in votes),
+        # Lets the contested-subject rule ask whether this promise is even
+        # about the question the bill raises.
+        promise_topic=promise.topic,
     )
     coherent, coherence_reason = evidence.status_is_supported(result.status, checks)
 

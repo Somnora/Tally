@@ -98,6 +98,7 @@ def revalidate(
             )
             check = evidence.check_citation(
                 claim, politician_id=citation.politician_id, vote_facts=facts,
+                promise_topic=citation.promise_topic,
             )
             checks.append(check)
             stats[f"citation_{check.reason}"] += 1

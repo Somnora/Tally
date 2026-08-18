@@ -14,7 +14,12 @@ import pytest
 
 from export.build_snapshot import build
 from pipeline import db
-from tests.test_evaluate_promises import _run, _seed, _substantive_vote_id
+from tests.test_evaluate_promises import (
+    _run,
+    _seed,
+    _sign_off,
+    _substantive_vote_id,
+)
 
 # Columns that would mean the export leaked donor identities, whole source
 # documents, or raw API payloads into a file anyone can download.
@@ -134,7 +139,7 @@ def test_unvalidated_citation_keeps_its_evaluation_out(
         "status": "broken", "consistency_score": 15,
         "llm_reasoning": "Cites a vote that does not exist.",
         "evidence": [{"kind": "vote", "id": 987654321, "position": "nay",
-                      "direction": "contradicts"}],
+                      "bill_effect": "advances"}],
     })
     _, manifest = _snapshot(tmp_path, conn)
     assert manifest["row_counts"]["evaluations"] == 0
@@ -154,8 +159,11 @@ def test_valid_evaluation_ships_with_its_receipts(
         "status": "broken", "consistency_score": 20,
         "llm_reasoning": "Voted against HR 1181 on passage.",
         "evidence": [{"kind": "vote", "id": vote_id, "position": "nay",
-                      "direction": "contradicts"}],
+                      "bill_effect": "advances"}],
     })
+    # Broken verdicts need a human signature before they publish; this test is
+    # about the snapshot carrying receipts, so it signs off explicitly.
+    _sign_off(conn, promise_id)
     out, manifest = _snapshot(tmp_path, conn)
     assert manifest["row_counts"]["evaluations"] == 1
     assert manifest["row_counts"]["evidence"] == 1
