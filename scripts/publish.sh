@@ -37,6 +37,7 @@ cd "$REPO_ROOT"
 SNAPSHOT="dist/tally.sqlite"
 MANIFEST="dist/tally.manifest.json"
 PAGE="web/index.html"
+METHOD="docs/methodology.md"
 BRANCH="gh-pages"
 
 CONFIRMED=0
@@ -66,7 +67,7 @@ fail() { printf 'REFUSING: %s\n' "$*" >&2; exit 1; }
 command -v gh  >/dev/null || fail "the gh CLI is not installed"
 gh auth status >/dev/null 2>&1 || fail "gh is not authenticated (run: gh auth login)"
 
-for f in "$SNAPSHOT" "$MANIFEST" "$PAGE"; do
+for f in "$SNAPSHOT" "$MANIFEST" "$PAGE" "$METHOD"; do
     [ -f "$f" ] || fail "$f is missing. Build it first:
     uv run python -m export.build_snapshot && uv run python -m web.build_page"
 done
@@ -134,6 +135,53 @@ if [ "$SKIP_PAGES" != 1 ]; then
     # Plumbing, so the working tree is never involved. Each file becomes a blob
     # in the object database directly; nothing is checked out anywhere.
     BLOB_PAGE="$(git hash-object -w "$PAGE")"
+    # The methodology ships WITH the page, not just in the repo. Every score
+    # links to it, and CLAUDE.md requires that link to work; a verdict whose
+    # "how this is produced" 404s is worse than one with no link at all.
+    METHOD_HTML="$(mktemp)"
+    python3 - "$METHOD" "$METHOD_HTML" <<'PYEOF'
+import html, pathlib, re, sys
+md = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+out, in_ul, in_code = [], False, False
+for line in md.splitlines():
+    if line.startswith("```"):
+        in_code = not in_code; out.append("<pre>" if in_code else "</pre>"); continue
+    if in_code:
+        out.append(html.escape(line)); continue
+    if line.startswith("|"):
+        cells = [html.escape(c.strip()) for c in line.strip("|").split("|")]
+        if set("".join(cells)) <= set("-: "):
+            continue
+        out.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+        continue
+    if line.startswith("- "):
+        if not in_ul: out.append("<ul>"); in_ul = True
+        out.append(f"<li>{html.escape(line[2:])}</li>"); continue
+    if in_ul: out.append("</ul>"); in_ul = False
+    m = re.match(r"^(#{1,4})\s+(.*)$", line)
+    if m:
+        level = len(m.group(1)); out.append(f"<h{level}>{html.escape(m.group(2))}</h{level}>")
+    elif line.strip():
+        out.append(f"<p>{html.escape(line)}</p>")
+if in_ul: out.append("</ul>")
+body = "\n".join(out)
+body = re.sub(r"(<tr>.*</tr>)", r"<table>\1</table>", body, flags=re.S, count=1)
+body = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", body)
+pathlib.Path(sys.argv[2]).write_text(
+    "<!doctype html><meta charset=utf-8><title>Tally methodology</title>"
+    "<meta name=viewport content='width=device-width,initial-scale=1'>"
+    "<style>body{max-width:46rem;margin:2rem auto;padding:0 1.2rem;"
+    "font:16px/1.65 ui-sans-serif,system-ui,sans-serif;color:#1a1c1a;background:#fbfbf9}"
+    "h1,h2,h3{line-height:1.25;margin:2rem 0 .6rem}h1{margin-top:0}"
+    "table{border-collapse:collapse;width:100%;margin:1rem 0}"
+    "td{border:1px solid #d8dcd6;padding:.45rem .6rem;font-size:14px;vertical-align:top}"
+    "code,pre{font-family:ui-monospace,monospace;font-size:13px}"
+    "pre{background:#f1f2ef;padding:.8rem;overflow-x:auto}"
+    "a{color:#2f6f4f}</style>\n<a href='./'>&larr; Back to Tally</a>\n" + body,
+    encoding="utf-8")
+PYEOF
+    BLOB_METHOD="$(git hash-object -w "$METHOD_HTML")"
+    rm -f "$METHOD_HTML"
     BLOB_SNAP="$(git hash-object -w "$SNAPSHOT")"
     BLOB_MAN="$(git hash-object -w "$MANIFEST")"
     # .nojekyll stops Pages running the build over these files. Without it,
@@ -143,6 +191,7 @@ if [ "$SKIP_PAGES" != 1 ]; then
     TREE="$(printf '%s\n' \
         "100644 blob $BLOB_NOJEKYLL	.nojekyll" \
         "100644 blob $BLOB_PAGE	index.html" \
+        "100644 blob $BLOB_METHOD	methodology.html" \
         "100644 blob $BLOB_MAN	tally.manifest.json" \
         "100644 blob $BLOB_SNAP	tally.sqlite" | git mktree)"
 

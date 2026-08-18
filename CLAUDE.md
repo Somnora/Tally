@@ -114,18 +114,6 @@ Reference implementation: `ingestion_blueprint.py`. Key patterns:
   docs before writing agent code (e.g., `output_type` / `result.output` in recent
   versions). Pin exact versions in requirements.
 
-## Repo layout (suggested)
-
-```
-/pipeline          # Python: DBOS workflows, steps, prompts/
-  /prompts         # versioned prompt templates (referenced by prompt_version)
-  /etl             # FEC bulk loaders, OpenSecrets CSV loaders, crosswalk seeder
-/db                # schema.sql (base) + schema_additions.sql + migrations/
-/export            # Postgres -> SQLite snapshot job + manifest generator
-/web               # static web app (GitHub Pages)
-/docs              # methodology page (public!), data source credits
-```
-
 ## Milestones (build in this order)
 
 1. DB up: base schema + `schema_additions.sql`; seed `id_crosswalk` and

@@ -150,6 +150,11 @@ def build() -> Path:
     con = sqlite3.connect(SNAPSHOT)
     try:
         payload = collect(con)
+        # Pairings are not votes: one vote is shown beside many promises, so
+        # reporting the pairing count as a vote count inflates it about 2.5x.
+        distinct_votes = _rows(
+            con, "SELECT count(DISTINCT vote_id) AS n FROM promise_votes"
+        )[0]["n"]
     finally:
         con.close()
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -248,17 +253,31 @@ def build() -> Path:
     all, and some bury it where our crawler did not follow. The map shows which is
     which rather than leaving a district looking empty.
     Snapshot built {built_on}: {counts['promises']} displayable promises, shown beside
-    {counts['promise_votes']} related roll-call votes. Money comes from FEC filings; votes link
+    {counts['promise_votes']} promise-to-vote pairings drawn from {distinct_votes} distinct
+    roll-call votes. Money comes from FEC filings; votes link
     to the House Clerk. Identical treatment, identical method, every candidate.</p>
-    <p><strong>*We publish no alignment scores.</strong> We can find the votes related to a
-    promise, and those are shown. Judging whether a vote KEPT or BROKE a promise is a harder
-    problem than it looks: a bill titled the &ldquo;Homeowner Energy Freedom Act&rdquo; repeals
-    home energy efficiency rebates, so voting against it protects them. Our scoring got that
-    backwards, we found it in review, and we withdrew every score rather than publish work we
-    could not stand behind. The evidence on this page is unaffected: quotes are matched
-    character-for-character against their source, and votes come straight from the official
-    record. Anything marked with an asterisk is a gap in what we have gathered, stated so you
-    can weigh it, not a finding about a candidate.</p>
+    <p><strong>*About the scores, and the ones we are not showing.</strong> Some promises
+    now carry an assessment of how the member has voted on related bills. It is deliberately
+    limited, and the limits matter more than the scores.
+    We publish only two kinds: that a member appears to be acting on a promise, or to have
+    completed it. <strong>We publish no finding that anyone BROKE a promise.</strong> Those
+    exist, and every one of them is held back for a person to check before it could ever
+    appear here.
+    That caution is earned. An earlier version of our scoring read a bill&rsquo;s title
+    instead of what the bill did, and then reasoned backwards about the vote: a bill called
+    the &ldquo;Homeowner Energy Freedom Act&rdquo; repeals home energy efficiency rebates, so
+    a member who voted against it PROTECTED those rebates, and we recorded that he had broken
+    his promise. We found it in review and withdrew every score we had.
+    What changed is not a better prompt. The model is no longer asked whether a vote supports
+    or contradicts a promise at all. It is asked only what passing the bill would do, and the
+    rest is arithmetic, so that particular mistake can no longer be expressed. Votes on
+    contested questions a promise never raised are not scored. And in our own most recent
+    check, about half of the broken-promise findings still looked wrong to us, which is
+    exactly why none of them are on this page.
+    The evidence is unaffected by any of it: quotes are matched character-for-character
+    against their source, and votes come straight from the official record. Anything marked
+    with an asterisk is a gap in what we have gathered, stated so you can weigh it, not a
+    finding about a candidate.</p>
   </footer>
 </div>
 <script>window.__TALLY_GEO__ = {geo};
