@@ -1188,11 +1188,11 @@ class WebsiteToHarvest:
 
 
 def candidate_websites_to_harvest(
-    conn: Connection, cycle: int, recheck: bool = False
+    conn: Connection, cycle: int, recheck: bool = False, outcome: str | None = None
 ) -> list[WebsiteToHarvest]:
     rows = conn.execute(
         load_sql("candidate_websites_to_harvest"),
-        {"cycle": cycle, "recheck": recheck},
+        {"cycle": cycle, "recheck": recheck, "outcome": outcome},
     ).fetchall()
     return [WebsiteToHarvest(int(r[0]), int(r[1]), str(r[2]), str(r[3])) for r in rows]
 

@@ -235,7 +235,7 @@ DEFAULT_WORKERS = 12
 EMPTY_STATS: StageStats = {
     "pages_fetched": 0, "pages_failed": 0, "pages_without_content": 0,
     "documents_stored": 0, "probes_missed": 0, "index_children_fetched": 0,
-    "press_releases_stored": 0,
+    "press_releases_stored": 0, "pages_tls_unverified": 0,
 }
 
 
@@ -268,11 +268,12 @@ def harvest(
     limit: int | None = None,
     recheck: bool = False,
     workers: int = DEFAULT_WORKERS,
+    outcome: str | None = None,
 ) -> Counter[str]:
     """Crawl each declared site, recording what happened to every one."""
     stats: Counter[str] = Counter()
     with db.connect() as conn:
-        targets = db.candidate_websites_to_harvest(conn, cycle, recheck)
+        targets = db.candidate_websites_to_harvest(conn, cycle, recheck, outcome)
     if limit:
         targets = targets[:limit]
     stats["sites"] = len(targets)
@@ -314,6 +315,9 @@ def main() -> None:
                         help="re-query candidates whose website we already have")
     parser.add_argument("--recheck", action="store_true",
                         help="re-crawl sites already visited")
+    parser.add_argument("--outcome", choices=("documents_stored", "no_content",
+                                              "unreachable", "robots_disallowed"),
+                        help="re-crawl only sites that last recorded this outcome")
     parser.add_argument("--workers", type=int, default=0,
                         help="tasks at once (per-host and API spacing are unchanged)")
     args = parser.parse_args()
@@ -329,7 +333,8 @@ def main() -> None:
                       f"(~{n * fec_api.MIN_INTERVAL_SECONDS / 60:.0f} minutes at the "
                       f"throttled rate)")
             else:
-                sites = db.candidate_websites_to_harvest(conn, args.cycle, args.recheck)
+                sites = db.candidate_websites_to_harvest(
+                    conn, args.cycle, args.recheck, args.outcome)
                 print(f"{len(sites)} sites would be crawled")
                 for site in sites[:10]:
                     print(f"  {site.name[:34]:<34} {site.url}")
@@ -338,7 +343,7 @@ def main() -> None:
     if args.phase == "discover":
         stats = discover(args.cycle, args.limit, args.rediscover, workers)
     else:
-        stats = harvest(args.cycle, args.limit, args.recheck, workers)
+        stats = harvest(args.cycle, args.limit, args.recheck, workers, args.outcome)
     print(f"\n{args.phase} complete")
     for key in sorted(stats):
         print(f"  {key:<28} {stats[key]}")

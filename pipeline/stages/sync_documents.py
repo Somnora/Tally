@@ -48,11 +48,19 @@ def _store_page(
     if text is None:
         stats["pages_without_content"] += 1
         return
+    # Carried on the document because it qualifies the evidence: a page read
+    # over a certificate we could not verify is still what the host served,
+    # but we cannot say the host was who it claimed to be. Recorded rather
+    # than refused, and never silent.
+    meta: dict[str, Any] = {"origin_url": url}
+    if webdocs.client().fetched_unverified(url):
+        meta["tls_verified"] = False
+        stats["pages_tls_unverified"] += 1
     db.insert_document(
         conn, politician_id=politician_id, source_id=source_id, doc_type=doc_type,
         title=title, url=url, published_at=None, full_text=text,
         content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        meta={"origin_url": url},
+        meta=meta,
     )
     stats["documents_stored"] += 1
 
@@ -102,7 +110,7 @@ def sync_site(
     stats: StageStats = {"pages_fetched": 0, "pages_failed": 0,
                          "pages_without_content": 0, "documents_stored": 0,
                          "probes_missed": 0, "index_children_fetched": 0,
-                         "press_releases_stored": 0}
+                         "press_releases_stored": 0, "pages_tls_unverified": 0}
     page_urls: list[str] = []
     fetched: set[str] = set()
 
@@ -224,7 +232,8 @@ def sync_official_site(
 def sync_wayback(conn: db.Connection, politician_id: int, page_urls: list[str]) -> StageStats:
     """Earliest cycle snapshot per page; unchanged content dedupes away."""
     stats: StageStats = {"snapshots_found": 0, "snapshots_missing": 0,
-                         "pages_without_content": 0, "documents_stored": 0}
+                         "pages_without_content": 0, "documents_stored": 0,
+                         "pages_tls_unverified": 0}
     for url in page_urls:
         snapshot = webdocs.earliest_snapshot(url)
         if snapshot is None:

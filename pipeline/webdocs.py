@@ -10,6 +10,7 @@ trafilatura (main-content extraction); pages that yield no meaningful text
 
 import json
 import logging
+import ssl
 import threading
 import time
 from dataclasses import dataclass
@@ -64,6 +65,24 @@ NOT_ISSUE_SEGMENTS = frozenset({"press-releases", "in-the-news", "editorial"})
 MIN_TEXT_CHARS = 400  # below this, a page is navigation/donation chrome, not content
 
 
+def is_certificate_error(exc: Exception) -> bool:
+    """Whether a connection failure was the certificate rather than the host.
+
+    A campaign whose host serves an incomplete certificate chain is live and
+    a voter can read it: browsers repair the chain themselves, strict clients
+    do not. Telling that apart from a dead domain is the difference between
+    reporting a candidate as silent and reading what they said.
+    """
+    seen: set[int] = set()
+    cause: BaseException | None = exc
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, ssl.SSLCertVerificationError):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return "CERTIFICATE_VERIFY_FAILED" in str(exc).upper()
+
+
 def throttle_key(url: str) -> str:
     """The host we owe politeness to, as the last two labels of its name.
 
@@ -84,6 +103,40 @@ class _FetchClient:
         self._lock = threading.Lock()
         self._next_allowed: dict[str, float] = {}
         self._robots: dict[str, robotparser.RobotFileParser] = {}
+        self._unverified: set[str] = set()
+
+    def fetched_unverified(self, url: str) -> bool:
+        """Whether this URL was read without a verified certificate chain."""
+        with self._lock:
+            return url in self._unverified
+
+    def _get_without_verification(self, url: str) -> bytes | None:
+        """One retry with certificate checking off, for a broken chain.
+
+        Deliberate, narrow, and recorded. We already read a campaign site the
+        committee declared as plain http, which carries no verification at
+        all, so refusing a misconfigured https host while accepting an
+        unencrypted one would be incoherent -- and it would fall hardest on
+        small campaigns with cheap hosting, which is the group this whole pass
+        exists to reach. Every page read this way is marked, and the
+        methodology page says so.
+        """
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        self._wait_for_slot(url)
+        try:
+            response = httpx.get(
+                url, timeout=30, headers={"User-Agent": USER_AGENT},
+                follow_redirects=True, verify=context,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return None
+        with self._lock:
+            self._unverified.add(url)
+        logger.info("%s read without certificate verification (broken chain)", url)
+        return response.content
 
     def _wait_for_slot(self, url: str) -> None:
         """Space requests per host, not globally.
@@ -150,6 +203,8 @@ class _FetchClient:
                 # will not start resolving two seconds later. Roughly a
                 # quarter of declared campaign addresses are dead registrations
                 # and each was costing three 30-second waits.
+                if isinstance(exc, httpx.ConnectError) and is_certificate_error(exc):
+                    return self._get_without_verification(url)
                 logger.debug("%s unreachable: %s", url, exc)
                 return None
             except httpx.HTTPError as exc:

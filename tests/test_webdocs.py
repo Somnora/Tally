@@ -1,11 +1,16 @@
 """Pure tests for campaign-page link discovery and text extraction."""
 
+import ssl
+
+import httpx
+
 from pipeline.webdocs import (
     MIN_TEXT_CHARS,
     discover_child_links,
     discover_issue_links,
     discover_press_index,
     extract_text,
+    is_certificate_error,
     throttle_key,
 )
 
@@ -169,3 +174,21 @@ def test_unrelated_campaign_domains_get_their_own_clocks() -> None:
         "https://www.grahamforsenate.com/", "https://abdulforsenate.com/issues",
         "https://alexbores.nyc")}
     assert len(keys) == 3
+
+
+# -- certificate handling ---------------------------------------------------
+
+def test_a_broken_certificate_chain_is_told_apart_from_a_dead_host() -> None:
+    """A campaign whose host serves an incomplete chain is live and a voter
+    can read it in a browser. Treating that as a dead domain would report the
+    candidate as silent, and it falls hardest on small campaigns with cheap
+    hosting."""
+    cert_error = ssl.SSLCertVerificationError("certificate verify failed")
+    wrapped = httpx.ConnectError("connection failed")
+    wrapped.__cause__ = cert_error
+    assert is_certificate_error(wrapped)
+
+
+def test_an_ordinary_connection_failure_is_not_a_certificate_error() -> None:
+    """A domain that does not resolve must not be retried unverified."""
+    assert not is_certificate_error(httpx.ConnectError("nodename nor servname provided"))
