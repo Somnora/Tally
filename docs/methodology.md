@@ -421,8 +421,26 @@ to guess. At present:
 - Voting records cover sitting members of Congress. A challenger who has
   never held federal office has no roll call record to compare against, and
   we show no alignment scoring for them.
-- Promises are collected for sitting members first, because they are the
-  only candidates whose statements can be checked against votes.
+- Promise sources now cover candidates, not only sitting members. Of the
+  4,079 candidates on file for this cycle, 2,581 declared a campaign web
+  address to the FEC, and we have read pages from 1,708 of them. Counting
+  every kind of document, we hold material for 1,798 candidates, against 461
+  before this pass.
+- Reading a page is not the same as publishing a promise, and the app shows
+  the difference. Promises appear only after a document has been through
+  extraction and both verification checks above, and that step has not yet
+  run for the campaign pages just collected. Until it does, those candidates
+  show their money and no promises, and the page says so rather than
+  implying they have made none.
+- Of the addresses that were declared but produced no pages: 576 no longer
+  resolve or refuse the connection, 282 serve their text only to a browser
+  and not to software like ours, and 18 campaigns ask crawlers not to read
+  them, which we honour. Those are counted separately because they mean
+  different things, and none of them means the candidate has been quiet.
+- Scoring a promise against a voting record still applies only to sitting
+  members. A challenger who has never held federal office has no roll call
+  to check anything against, so we show their promises without alignment
+  scoring rather than inventing a comparison.
 
 Where we have nothing for a candidate, the app says we have nothing. An empty
 section means we have not gathered it yet, never that the candidate said or
