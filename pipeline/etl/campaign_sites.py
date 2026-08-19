@@ -236,6 +236,7 @@ EMPTY_STATS: StageStats = {
     "pages_fetched": 0, "pages_failed": 0, "pages_without_content": 0,
     "documents_stored": 0, "probes_missed": 0, "index_children_fetched": 0,
     "press_releases_stored": 0, "pages_tls_unverified": 0,
+    "pages_over_time_budget": 0,
 }
 
 

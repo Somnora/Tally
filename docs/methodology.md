@@ -205,6 +205,48 @@ candidate asking for your vote. Both are that person stating what they intend
 to do, but only one is a campaign promise, and we label them differently
 rather than merging them.
 
+### Where a campaign website comes from
+
+We do not search for a candidate's website. We read the address the campaign
+gave the Federal Election Commission.
+
+Every committee a candidate authorizes files a Form 1, and that form asks for
+the committee's web address. It is the campaign's own statement, made to a
+federal regulator, about where its campaign lives. We ask the FEC for each
+candidate's authorized committees and take the address from there, matched on
+the committee identifier rather than on anyone's name.
+
+The reason is not convenience. The other ways to find a challenger's website
+are to search their name or to buy a list from someone who did. A name search
+has to decide which Brown is Sherrod Brown and which is Shontel Brown, and a
+wrong decision publishes one candidate's words on another candidate's page.
+Reading an address the campaign filed itself removes that decision.
+
+Four things we will not do here.
+
+We do not repair a mistyped address. One 2026 filing reads
+VONDRASFORCONGRESS,ORG, where the comma is plainly meant to be a period, and
+we still record that we have no site rather than invent one the campaign did
+not file.
+
+We do not read committees the candidate did not authorize. A political action
+committee may file a website too, and publishing that as the candidate's own
+would put a spender's words on a candidate's page.
+
+We do not treat a candidate's Facebook page or donation form as a campaign
+site. We count them and say so, because there is nothing on them a promise
+can be read from, but we do not pretend they are the same thing as a site
+with stated positions.
+
+We do not hide it when a page was read over a connection we could not
+verify. Some campaigns run misconfigured certificates, which a browser
+repairs silently and stricter software does not. Refusing those pages would
+have reported live campaigns as silent, and it would have fallen hardest on
+campaigns with the cheapest hosting. So we read them, and every page read
+that way is stored with a mark saying the certificate was not verified: what
+the host served is still evidence, but we cannot promise the host was who it
+claimed to be.
+
 Two limits worth stating plainly. First, we measured the screening rules
 against a hand reviewed set of 118 quotes drawn from video transcripts, and
 they are less well measured on written material, which currently supplies

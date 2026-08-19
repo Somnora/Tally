@@ -20,6 +20,7 @@ nothing. full_text is immutable once promises reference it.
 import hashlib
 import json
 import logging
+import time
 from typing import Any
 
 from pipeline import db, webdocs, youtube
@@ -75,6 +76,13 @@ _INDEX_TAILS = ("issues", "priorities", "legislation", "platform", "agenda")
 # problem before it is a bandwidth one.
 MAX_SITE_PAGES = 24
 
+# Wall-clock ceiling for one site. A page cap alone does not bound the time: a
+# host that accepts connections and then never answers costs the full read
+# timeout on every attempt, and one such campaign held a worker for the length
+# of a whole national round while the other eleven sat idle. Whatever has been
+# stored by the deadline is kept; the rest is recorded as not fetched.
+MAX_SITE_SECONDS = 180.0
+
 
 def sync_site(
     conn: db.Connection,
@@ -110,13 +118,18 @@ def sync_site(
     stats: StageStats = {"pages_fetched": 0, "pages_failed": 0,
                          "pages_without_content": 0, "documents_stored": 0,
                          "probes_missed": 0, "index_children_fetched": 0,
-                         "press_releases_stored": 0, "pages_tls_unverified": 0}
+                         "press_releases_stored": 0, "pages_tls_unverified": 0,
+                         "pages_over_time_budget": 0}
     page_urls: list[str] = []
     fetched: set[str] = set()
+    deadline = time.monotonic() + MAX_SITE_SECONDS
 
     def fetch(url: str, *, speculative: bool = False) -> bytes | None:
         key = url.rstrip("/")
         if key in fetched or len(fetched) >= MAX_SITE_PAGES:
+            return None
+        if time.monotonic() > deadline:
+            stats["pages_over_time_budget"] += 1
             return None
         fetched.add(key)
         html = webdocs.client().get(url)
