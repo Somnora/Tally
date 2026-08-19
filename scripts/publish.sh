@@ -142,28 +142,79 @@ if [ "$SKIP_PAGES" != 1 ]; then
     python3 - "$METHOD" "$METHOD_HTML" <<'PYEOF'
 import html, pathlib, re, sys
 md = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-out, in_ul, in_code = [], False, False
-for line in md.splitlines():
+
+# Blocks, not lines. The source is hard wrapped at about 72 characters, and a
+# line-per-element converter turned every wrapped line into its own paragraph
+# and pushed the continuation of each bullet out of its own list. The rendered
+# page said the right things in the wrong shape, which on the one page that
+# exists to explain how the numbers are made is its own kind of inaccuracy.
+out, buf, mode, list_tag, in_code = [], [], None, None, False
+
+
+def flush():
+    global buf, mode
+    if buf:
+        text = html.escape(" ".join(buf))
+        out.append(f"<li>{text}</li>" if mode == "li" else f"<p>{text}</p>")
+    buf, mode = [], None
+
+
+def close_list():
+    global list_tag
+    if list_tag:
+        out.append(f"</{list_tag}>")
+        list_tag = None
+
+
+def open_list(tag):
+    global list_tag
+    if list_tag != tag:
+        close_list()
+        out.append(f"<{tag}>")
+        list_tag = tag
+
+
+for raw in md.splitlines():
+    line = raw.rstrip()
     if line.startswith("```"):
-        in_code = not in_code; out.append("<pre>" if in_code else "</pre>"); continue
+        flush(); close_list()
+        in_code = not in_code
+        out.append("<pre>" if in_code else "</pre>")
+        continue
     if in_code:
-        out.append(html.escape(line)); continue
+        out.append(html.escape(raw)); continue
+    if not line.strip():
+        flush(); continue
     if line.startswith("|"):
+        flush(); close_list()
         cells = [html.escape(c.strip()) for c in line.strip("|").split("|")]
         if set("".join(cells)) <= set("-: "):
             continue
         out.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
         continue
-    if line.startswith("- "):
-        if not in_ul: out.append("<ul>"); in_ul = True
-        out.append(f"<li>{html.escape(line[2:])}</li>"); continue
-    if in_ul: out.append("</ul>"); in_ul = False
-    m = re.match(r"^(#{1,4})\s+(.*)$", line)
-    if m:
-        level = len(m.group(1)); out.append(f"<h{level}>{html.escape(m.group(2))}</h{level}>")
-    elif line.strip():
-        out.append(f"<p>{html.escape(line)}</p>")
-if in_ul: out.append("</ul>")
+    heading = re.match(r"^(#{1,4})\s+(.*)$", line)
+    if heading:
+        flush(); close_list()
+        level = len(heading.group(1))
+        out.append(f"<h{level}>{html.escape(heading.group(2))}</h{level}>")
+        continue
+    bullet = re.match(r"^[-*]\s+(.*)$", line)
+    ordered = re.match(r"^\d+\.\s+(.*)$", line)
+    if bullet or ordered:
+        flush()
+        open_list("ul" if bullet else "ol")
+        mode = "li"
+        buf.append((bullet or ordered).group(1))
+        continue
+    # An indented line continues whatever block is open; that is what wrapping
+    # looks like in the source.
+    if mode is not None and raw[:1].isspace():
+        buf.append(line.strip()); continue
+    if mode is None:
+        close_list(); mode = "p"
+    buf.append(line.strip())
+
+flush(); close_list()
 body = "\n".join(out)
 body = re.sub(r"(<tr>.*</tr>)", r"<table>\1</table>", body, flags=re.S, count=1)
 body = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", body)
@@ -173,6 +224,7 @@ pathlib.Path(sys.argv[2]).write_text(
     "<style>body{max-width:46rem;margin:2rem auto;padding:0 1.2rem;"
     "font:16px/1.65 ui-sans-serif,system-ui,sans-serif;color:#1a1c1a;background:#fbfbf9}"
     "h1,h2,h3{line-height:1.25;margin:2rem 0 .6rem}h1{margin-top:0}"
+    "ul,ol{padding-left:1.3rem}li{margin:.35rem 0}"
     "table{border-collapse:collapse;width:100%;margin:1rem 0}"
     "td{border:1px solid #d8dcd6;padding:.45rem .6rem;font-size:14px;vertical-align:top}"
     "code,pre{font-family:ui-monospace,monospace;font-size:13px}"
