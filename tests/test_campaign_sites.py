@@ -137,3 +137,11 @@ def test_missing_and_unusable_values_produce_nothing() -> None:
 def test_an_empty_payload_is_not_an_error() -> None:
     assert websites_from_payload({}) == []
     assert websites_from_payload({"results": []}) == []
+
+
+def test_a_campaign_on_a_free_site_builder_is_still_a_campaign_site() -> None:
+    """These are small campaigns, which are the ones least likely to be
+    covered anywhere else. Filtering them out because the host looks cheap
+    would rebuild by hand the bias this whole pass exists to remove."""
+    assert not is_non_site("https://janedoe.wixsite.com/campaign")
+    assert not is_non_site("https://smithforcongress.godaddysites.com")

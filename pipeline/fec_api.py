@@ -68,9 +68,16 @@ class FecApiClient:
                     timeout=30, follow_redirects=True,
                 )
                 if response.status_code == 429:
+                    # Logged whether or not a backup key exists. Without this
+                    # branch saying anything, a single-key run that is being
+                    # throttled looks exactly like an API that has gone slow,
+                    # and the difference decides whether you wait or reduce
+                    # the request rate.
                     if len(self._keys) > 1:
                         self._active_key = 1 - self._active_key
                         logger.warning("FEC rate limit hit; switching to backup key")
+                    else:
+                        logger.warning("FEC rate limit hit; backing off (no backup key set)")
                     time.sleep(2.0 * attempt)
                     continue
                 response.raise_for_status()

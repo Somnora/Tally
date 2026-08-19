@@ -48,7 +48,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
-from pipeline import db, fec_api
+from pipeline import db, fec_api, webdocs
 from pipeline.stages import StageStats
 from pipeline.stages.sync_documents import sync_campaign_site
 
@@ -65,15 +65,22 @@ AUTHORIZED_DESIGNATIONS = frozenset({"P", "A"})
 # real domain containing one of these words is untouched.
 PLACEHOLDERS = re.compile(r"(?i)^(n/?a|none|no|nil|tbd|pending|not applicable|unknown|[-.]+)$")
 
-# Hosts that are a presence but not a campaign site: no issue pages to read,
-# robots.txt closed to crawlers, and nothing trafilatura can pull prose from.
-# Counted and reported rather than stored, because a row we will never fetch
-# would show up in coverage as an unexplained blank.
+# Hosts that are a presence but not a campaign site: a profile, a donation
+# form or a list of links, with no issue pages to read and nothing a text
+# extractor can pull prose from. Counted and reported rather than stored,
+# because a row we will never fetch would show up in coverage as an
+# unexplained blank.
+#
+# Site builders are deliberately NOT here. A campaign on a free wixsite.com or
+# godaddysites.com subdomain has a real site with real issue pages, and it
+# tends to be a small campaign -- the candidates least likely to be covered
+# anywhere else, which is the whole point of this pass. Excluding a host
+# because it looks cheap would rebuild the bias by hand.
 NON_SITE_HOSTS = (
     "facebook.com", "fb.com", "twitter.com", "x.com", "instagram.com",
     "linkedin.com", "youtube.com", "youtu.be", "tiktok.com", "threads.net",
     "actblue.com", "winred.com", "anedot.com", "donorbox.org", "gofundme.com",
-    "linktr.ee", "wixsite.com", "godaddysites.com",
+    "linktr.ee",
 )
 
 
@@ -225,8 +232,24 @@ def discover(
 DEFAULT_WORKERS = 12
 
 
+EMPTY_STATS: StageStats = {
+    "pages_fetched": 0, "pages_failed": 0, "pages_without_content": 0,
+    "documents_stored": 0, "probes_missed": 0, "index_children_fetched": 0,
+    "press_releases_stored": 0,
+}
+
+
 def _harvest_one(site: db.WebsiteToHarvest) -> tuple[str, StageStats]:
     """Crawl one site in its own connection, so one failure rolls back one site."""
+    # Asked before crawling, and recorded separately, because "this campaign
+    # asked not to be crawled" and "this address does not resolve" are
+    # different facts about why we have nothing. Collapsing them would let the
+    # coverage page imply a live campaign is a dead one.
+    if not webdocs.client().allowed_by_robots(site.url):
+        with db.connect() as conn:
+            db.record_website_fetch(conn, site.candidate_website_id, "robots_disallowed")
+        return "robots_disallowed", dict(EMPTY_STATS)
+
     with db.connect() as conn:
         result = sync_campaign_site(conn, site.politician_id, site.url)
         site_stats: StageStats = result["stats"]
