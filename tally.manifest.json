@@ -1,0 +1,25 @@
+{
+  "format_version": 2,
+  "cycle": 2026,
+  "generated_at": "2026-08-19T05:26:29+00:00",
+  "filename": "tally.sqlite",
+  "size_bytes": 25477120,
+  "sha256": "2782dcb758657c1224be2688972f7882670f8b4bbf64f2205ba792bc394258ed",
+  "row_counts": {
+    "races": 470,
+    "candidates": 4079,
+    "finance": 4079,
+    "top_donors": 11727,
+    "outside_spenders": 1837,
+    "conduits": 2680,
+    "promises": 3756,
+    "promise_votes": 26826,
+    "evaluations": 856,
+    "evidence": 6284,
+    "collected": 1798,
+    "member_record": 461,
+    "member_topics": 2305,
+    "recent_votes": 1284
+  },
+  "context_chars": 300
+}
