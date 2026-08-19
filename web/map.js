@@ -365,8 +365,12 @@ function renderMap(){
     const inner = STATE_GEOMS.map(s => {
       const cs = DATA.candidates.filter(c => c.state === s.code);
       const researched = cs.some(hasResearch);
-      const cls = researched ? 'st researched' : (cs.length ? 'st funded' : 'st bare');
-      const label = researched ? ' (promises researched)' : (cs.length ? ' (finance only)' : '');
+      const pending = !researched && cs.some(isPending);
+      const cls = researched ? 'st researched'
+        : pending ? 'st collected' : (cs.length ? 'st funded' : 'st bare');
+      const label = researched ? ' (promises researched)'
+        : pending ? ' (collected, not yet analysed)'
+        : (cs.length ? ' (finance only)' : '');
       return `<path class="${cls} ${s.code===curState?'on':''}" d="${pathFor(s.geom)}"
         data-state="${s.code}" tabindex="0" role="button"
         aria-label="${s.code}${label}"><title>${s.code}${label}</title></path>`;
@@ -374,6 +378,7 @@ function renderMap(){
     host.innerHTML = svgFrame(STATE_GEOMS, inner) + `
       <div class="map-legend">
         <span><i class="sw researched"></i>promises researched</span>
+        <span><i class="sw collected"></i>collected, not yet analysed</span>
         <span><i class="sw funded"></i>finance only</span>
         ${ZOOM_CONTROLS}
         <span class="map-hint">Click a state to see its districts</span>
@@ -388,18 +393,24 @@ function renderMap(){
     const cs = DATA.candidates.filter(c =>
       c.state === curState && c.office === 'house' && c.district === d.district);
     const researched = cs.some(hasResearch);
+    const pending = !researched && cs.some(isPending);
     const key = `house|${d.district}`;
-    const cls = researched ? 'st researched' : (cs.length ? 'st funded' : 'st bare');
+    const cls = researched ? 'st researched'
+      : pending ? 'st collected' : (cs.length ? 'st funded' : 'st bare');
+    const dLabel = researched ? ' (promises researched)'
+      : pending ? ' (collected, not yet analysed)'
+      : (cs.length ? ' (finance only)' : '');
     const num = d.district === '00' ? 'at large' : String(Number(d.district));
     return `<path class="${cls} ${key===curSeat?'on':''}" d="${pathFor(d.geom)}"
       data-seat="${key}" tabindex="0" role="button"
-      aria-label="${curState} district ${num}"><title>${curState} ${num}</title></path>`;
+      aria-label="${curState} district ${num}${dLabel}"><title>${curState} ${num}${dLabel}</title></path>`;
   }).join('');
   placeTierShown = placeTierFor(mapView.k);
   host.innerHTML = svgFrame(ds, inner + placeLabels(curState, placeTierShown), 'state-level') + `
     <div class="map-legend">
       <button class="map-back" data-back="1">&larr; All states</button>
       <span><i class="sw researched"></i>promises researched</span>
+      <span><i class="sw collected"></i>collected, not yet analysed</span>
       <span><i class="sw funded"></i>finance only, no promises yet</span>
       ${ZOOM_CONTROLS}
       <span class="map-hint">${curState} &middot; ${ds.length} district${ds.length===1?'':'s'}

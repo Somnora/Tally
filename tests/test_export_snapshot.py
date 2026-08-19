@@ -245,3 +245,61 @@ def test_outside_spenders_travel_with_the_totals_they_explain(
     # The committee id has to survive, or the reader cannot check the claim
     # against the FEC record it came from.
     assert rows[0][3] == "C00000009"
+
+
+def test_an_unread_document_is_published_as_pending_not_as_a_promise(
+    conn: db.Connection, tmp_path: Path
+) -> None:
+    """The map shades a district "collected, not yet analysed" from this table.
+
+    It exists because a district where nobody has spoken and one where nobody
+    has listened were drawn the same shade, which reads as a candidate having
+    said nothing when the truth is that we have not looked yet. What must not
+    happen is the opposite error: a document that has never been through
+    extraction and verification must not reach the snapshot as anything a
+    reader could mistake for a promise.
+    """
+    from tests.test_finance_schema import _seed_candidate
+
+    politician_id, source_id = _seed_candidate(conn)
+    db.insert_document(
+        conn, politician_id=politician_id, source_id=source_id,
+        doc_type="campaign_site", title="Campaign homepage",
+        url="https://example.test/issues", published_at=None,
+        full_text="We will build a bridge across the river.",
+        content_hash="collected-fixture", meta={},
+    )
+    out, manifest = _snapshot(tmp_path, conn)
+
+    assert manifest["row_counts"]["collected"] == 1
+    assert _rows(out, "SELECT documents, pending FROM collected") == [(1, 1)]
+    # The words themselves stay server-side until they are verified.
+    assert manifest["row_counts"]["promises"] == 0
+    assert _rows(out, "SELECT count(*) FROM collected WHERE pending = 0") == [(0,)]
+
+
+def test_a_document_that_has_been_read_stops_counting_as_pending(
+    conn: db.Connection, tmp_path: Path
+) -> None:
+    """Otherwise the map would keep promising analysis that already happened.
+
+    Extraction finding nothing quotable is a real outcome, and the label has
+    to stop claiming the work is still to come once it has been done.
+    """
+    from tests.test_finance_schema import _seed_candidate
+
+    politician_id, source_id = _seed_candidate(conn)
+    document_id = db.insert_document(
+        conn, politician_id=politician_id, source_id=source_id,
+        doc_type="campaign_site", title="Campaign homepage",
+        url="https://example.test/issues", published_at=None,
+        full_text="We will build a bridge across the river.",
+        content_hash="analysed-fixture", meta={},
+    )
+    db.mark_document_extracted(
+        conn, document_id=document_id, model_name="test-model",
+        prompt_version="v-test",
+    )
+    out, _ = _snapshot(tmp_path, conn)
+
+    assert _rows(out, "SELECT documents, pending FROM collected") == [(1, 0)]

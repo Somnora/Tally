@@ -446,6 +446,12 @@ Where we have nothing for a candidate, the app says we have nothing. An empty
 section means we have not gathered it yet, never that the candidate said or
 did nothing.
 
+The map draws that distinction too. A district shaded "collected, not yet
+analysed" is one where we hold the candidates' own pages and have not yet run
+extraction over them, which is a different statement from having nothing to
+show. It reverts to the plainer shading once the material has been read,
+whether or not reading it produced a single publishable promise.
+
 ## Corrections
 
 If something here is wrong, we want to fix it and say that we fixed it.

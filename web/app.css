@@ -184,7 +184,12 @@ footer{margin-top:52px;padding-top:22px;border-top:1px solid var(--rule);
    use non-scaling-stroke so a hairline stays a hairline whether the viewBox
    is the whole country or one state. */
 :root{
-  --map-bare:#E7EBE7; --map-fill:#D6DED8; --map-research:#8FC3B2;
+  /* Four steps, and the order is the pipeline: nothing, money only,
+     documents collected, promises published. --map-collected sits between
+     fill and research on purpose, so a reader sees progress toward green
+     rather than a fourth unrelated category. */
+  --map-bare:#E7EBE7; --map-fill:#D6DED8; --map-collected:#B3D1C5;
+  --map-research:#8FC3B2;
   --map-line:#8A978F; --map-hot:#4E8E7C; --map-on:#2C5A4F;
 }
 .map-wrap{margin-bottom:22px}
@@ -196,6 +201,7 @@ svg.map path{
 }
 svg.map path.bare{fill:var(--map-bare)}
 svg.map path.funded{fill:var(--map-fill)}
+svg.map path.collected{fill:var(--map-collected)}
 svg.map path.researched{fill:var(--map-research)}
 svg.map path:hover{fill:var(--map-hot);stroke-width:1.6}
 svg.map path.on{fill:var(--map-on);stroke:var(--map-on);stroke-width:1.6}
@@ -206,6 +212,7 @@ svg.map path:focus-visible{outline:none;stroke:var(--ink);stroke-width:2.4}
 .map-legend i.sw{width:11px;height:11px;border-radius:2px;display:inline-block;
   border:1px solid var(--map-line)}
 .map-legend i.sw.researched{background:var(--map-research)}
+.map-legend i.sw.collected{background:var(--map-collected)}
 .map-legend i.sw.funded{background:var(--map-fill)}
 .map-hint{margin-left:auto;text-align:right}
 .map-back{appearance:none;font:inherit;font-size:12.5px;cursor:pointer;padding:5px 11px;

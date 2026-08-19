@@ -2,7 +2,7 @@ const DATA = window.__TALLY__;
 
 /* Bulk tables arrive column-wise to keep the download small; rehydrate them
    into plain objects once, so every render function below reads normally. */
-for(const name of ['candidates','finance','donors','spenders','conduits','votes','topics','record']){
+for(const name of ['candidates','finance','donors','spenders','conduits','votes','topics','record','collected']){
   const t = DATA[name];
   if(t && !Array.isArray(t)){
     DATA[name] = t.rows.map(r => {
@@ -44,6 +44,15 @@ const votesFor  = c => byId(DATA.votes||[],'politician_id',c.politician_id);
 // else shows money only, and says so rather than looking empty.
 const RESEARCHED = new Set(DATA.promises.map(p => p.politician_id));
 const hasResearch = c => RESEARCHED.has(c.politician_id);
+
+// Candidates whose documents we hold but have not run extraction over. This
+// is a different fact from having nothing, and the map used to draw both the
+// same shade: a district where nobody has spoken looked identical to one
+// where nobody has listened. Only counts as pending while something is
+// genuinely unread, so the label stays true after extraction runs.
+const PENDING = new Set((DATA.collected||[]).filter(r => r.pending > 0)
+  .map(r => r.politician_id));
+const isPending = c => !RESEARCHED.has(c.politician_id) && PENDING.has(c.politician_id);
 
 const STATES = [...new Set(DATA.candidates.map(c => c.state))].sort();
 const seatKey = c => `${c.office}|${c.district ?? ''}`;

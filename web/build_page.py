@@ -155,6 +155,9 @@ def collect(con: sqlite3.Connection) -> dict[str, list[dict]]:
         "record": record,
         "topics": topics,
         "votes": votes,
+        # Per-candidate document counts, so the map can say "collected, not
+        # yet analysed" only where that is true.
+        "collected": _rows(con, "SELECT * FROM collected"),
     }
 
 
@@ -182,7 +185,7 @@ def build() -> Path:
     # alone, and the reader downloads every byte. app.js rehydrates them into
     # ordinary objects at load, so nothing downstream knows the difference.
     for name in ("candidates", "finance", "donors", "spenders", "conduits",
-                 "votes", "topics", "record"):
+                 "votes", "topics", "record", "collected"):
         rows = payload[name]
         if not rows:
             payload[name] = {"cols": [], "rows": []}

@@ -115,6 +115,12 @@ TABLES: tuple[TableSpec, ...] = (
     # An incumbent's own record. Without these a sitting member's card can
     # only say what they raised, while their entire voting history sits
     # unused in the database.
+    # How much we hold for a candidate and how much of it the extractor has
+    # not read yet. Without this the app cannot tell a district where nobody
+    # has spoken from one where nobody has listened, and it was drawing both
+    # the same shade.
+    TableSpec("collected", "export_collected", ("cycle",),
+              ("politician_id",)),
     TableSpec("member_record", "export_member_record", ("cycle",),
               ("politician_id",)),
     TableSpec("member_topics", "export_member_topics", ("cycle",),
