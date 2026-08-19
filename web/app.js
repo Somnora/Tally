@@ -14,6 +14,17 @@ for(const name of ['candidates','finance','donors','spenders','conduits','votes'
 }
 const ROLE = {I:'Incumbent', C:'Challenger', O:'Open seat'};
 const OFFICE = {house:'US House', senate:'US Senate'};
+// What kind of document a quote came from. A reader is entitled to know
+// whether they are reading a congressional office publishing under rules that
+// restrict campaign content, or a candidate asking for their vote. Most
+// harvested pages carry no title of their own, so without this the source line
+// read 'campaign_site'.
+const DOCKIND = {
+  official_site:'Official congressional website', campaign_site:'Campaign website',
+  press_release:'Press release', youtube_transcript:'Video transcript',
+  wayback_snapshot:'Archived page', debate_transcript:'Debate transcript',
+};
+const docKind = t => DOCKIND[t] || 'Document';
 const usd = n => (n==null||n==='') ? '--' : '$' + Number(n).toLocaleString('en-US');
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -171,7 +182,7 @@ function renderPromise(p){
     </button>
     <div class="p-body">
       <p class="ctx">&hellip;${esc(before)}<mark>${esc(p.verbatim_quote)}</mark>${esc(after)}&hellip;</p>
-      <p class="src">Source: ${esc(p.document_title||p.doc_type||'document')}
+      <p class="src">Source: ${esc(p.document_title||docKind(p.doc_type))}
         &middot; <a href="${esc(p.document_url)}" target="_blank" rel="noopener">view original</a></p>
       ${ev ? renderVerdict(ev) : renderRelatedVotes(p)}
     </div>

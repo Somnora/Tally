@@ -99,3 +99,17 @@ def candidate_totals(fec_candidate_id: str, cycle: int) -> tuple[dict[str, Any],
         f"/candidate/{fec_candidate_id}/totals/",
         {"cycle": cycle, "election_full": "false", "per_page": 10},
     )
+
+
+def candidate_committees(fec_candidate_id: str, cycle: int) -> tuple[dict[str, Any], str]:
+    """Committees authorized by a candidate, with their Form 1 detail.
+
+    This endpoint carries the committee's declared `website`; the bulk
+    committee master and the /committees/ list endpoint both omit it, so a
+    per-candidate call is the only way to read it. At ~4,000 candidates that
+    is well inside one hour of the key's rate limit.
+    """
+    return client().get(
+        f"/candidate/{fec_candidate_id}/committees/",
+        {"cycle": cycle, "per_page": 100},
+    )

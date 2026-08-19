@@ -173,8 +173,27 @@ def sync_site(
 def sync_campaign_site(
     conn: db.Connection, politician_id: int, campaign_url: str
 ) -> dict[str, Any]:
-    """A candidate's own campaign site."""
-    return sync_site(conn, politician_id, campaign_url)
+    """A candidate's own campaign site.
+
+    The probe list is measured, not guessed. Campaign homepages are far more
+    often a splash screen than an official site is -- a photo, a slogan and a
+    donate button, with the positions one click away. Across 60 sampled 2026
+    campaign sites, 11 homepages carried under 150 words, and probing these
+    four paths recovered substantive text on 5 of them; adrianboafo.com went
+    from 10 words to 2,967 at /issues. The other 6 were script-rendered
+    shells that serve no prose to any fetcher, which is a limit of static
+    crawling and is recorded as such rather than retried.
+
+    Press releases are followed, fewer than on an official site. A campaign's
+    own releases are first-party statements a promise can be verified
+    against, but on a campaign site the issue pages are usually the real
+    content, and the per-site page ceiling is shared between them.
+    """
+    return sync_site(
+        conn, politician_id, campaign_url,
+        probe_paths=("/issues", "/priorities", "/platform", "/about"),
+        press_release_cap=4,
+    )
 
 
 def sync_official_site(

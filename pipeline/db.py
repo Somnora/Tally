@@ -1134,3 +1134,85 @@ def count_rows(conn: Connection, table: str) -> int:
     """Row count for status reports. Identifier is safely quoted, not interpolated."""
     query = pgsql.SQL("SELECT count(*) FROM {}").format(pgsql.Identifier(table))
     return _returned_id(conn.execute(query))
+
+
+# -- candidate_websites ------------------------------------------------------
+
+@dataclass(frozen=True)
+class CandidateForDiscovery:
+    fec_candidate_id: str
+    politician_id: int
+    name: str
+
+
+def candidates_for_website_discovery(
+    conn: Connection, cycle: int, rediscover: bool = False
+) -> list[CandidateForDiscovery]:
+    """Ballot-qualified candidates whose declared website we have not read."""
+    rows = conn.execute(
+        load_sql("candidates_for_website_discovery"),
+        {"cycle": cycle, "rediscover": rediscover},
+    ).fetchall()
+    return [CandidateForDiscovery(str(r[0]), int(r[1]), str(r[2])) for r in rows]
+
+
+def insert_candidate_website(
+    conn: Connection,
+    *,
+    politician_id: int,
+    fec_candidate_id: str,
+    cycle: int,
+    cmte_id: str,
+    url: str,
+    declared_url: str,
+    source_id: int,
+) -> int:
+    """Record a website a committee declared on Form 1; idempotent per URL."""
+    return _returned_id(conn.execute(load_sql("candidate_website_upsert"), {
+        "politician_id": politician_id,
+        "fec_candidate_id": fec_candidate_id,
+        "cycle": cycle,
+        "cmte_id": cmte_id,
+        "url": url,
+        "declared_url": declared_url,
+        "source_id": source_id,
+    }))
+
+
+@dataclass(frozen=True)
+class WebsiteToHarvest:
+    candidate_website_id: int
+    politician_id: int
+    url: str
+    name: str
+
+
+def candidate_websites_to_harvest(
+    conn: Connection, cycle: int, recheck: bool = False
+) -> list[WebsiteToHarvest]:
+    rows = conn.execute(
+        load_sql("candidate_websites_to_harvest"),
+        {"cycle": cycle, "recheck": recheck},
+    ).fetchall()
+    return [WebsiteToHarvest(int(r[0]), int(r[1]), str(r[2]), str(r[3])) for r in rows]
+
+
+def record_website_fetch(
+    conn: Connection, candidate_website_id: int, fetch_outcome: str
+) -> None:
+    """Store what happened when we asked, so coverage is reportable."""
+    conn.execute(load_sql("candidate_website_record_fetch"), {
+        "candidate_website_id": candidate_website_id,
+        "fetch_outcome": fetch_outcome,
+    })
+
+
+def record_website_scan(
+    conn: Connection, fec_candidate_id: str, cycle: int, websites_found: int
+) -> None:
+    """Note that we asked, and what we got, so a rerun does not ask again."""
+    conn.execute(load_sql("candidate_website_scan_upsert"), {
+        "fec_candidate_id": fec_candidate_id,
+        "cycle": cycle,
+        "websites_found": websites_found,
+    })

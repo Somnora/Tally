@@ -1,7 +1,9 @@
 """Campaign-site and Wayback Machine document fetching.
 
 Etiquette: robots.txt is checked per host and honored; requests carry the
-project user agent and are globally throttled. Text extraction uses
+project user agent and are spaced per host, so no single server sees traffic
+faster than one request every 1.5 seconds no matter how many are in flight
+across the internet. Text extraction uses
 trafilatura (main-content extraction); pages that yield no meaningful text
 (splash pages, donation forms) are skipped by the caller.
 """
@@ -62,20 +64,44 @@ NOT_ISSUE_SEGMENTS = frozenset({"press-releases", "in-the-news", "editorial"})
 MIN_TEXT_CHARS = 400  # below this, a page is navigation/donation chrome, not content
 
 
+def throttle_key(url: str) -> str:
+    """The host we owe politeness to, as the last two labels of its name.
+
+    Coarser than the full hostname on purpose. Every member's official site
+    is its own subdomain of house.gov but they share infrastructure, so
+    spacing per subdomain would let 435 of them be hit at once. Two labels
+    keeps the whole of house.gov on one clock while leaving 3,000 unrelated
+    campaign domains on 3,000 separate ones, which is what politeness
+    actually means here.
+    """
+    host = urlsplit(url).netloc.lower().split(":")[0]
+    labels = [label for label in host.split(".") if label]
+    return ".".join(labels[-2:]) if len(labels) >= 2 else host
+
+
 class _FetchClient:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._next_allowed = 0.0
+        self._next_allowed: dict[str, float] = {}
         self._robots: dict[str, robotparser.RobotFileParser] = {}
 
-    def _wait_for_slot(self) -> None:
+    def _wait_for_slot(self, url: str) -> None:
+        """Space requests per host, not globally.
+
+        A single global clock made a national campaign-site pass take days:
+        every request waited on every unrelated request that preceded it,
+        while no individual server saw traffic worth throttling. Sequential
+        callers are unaffected, because a walk of one site hits one host.
+        """
+        key = throttle_key(url)
         while True:
             with self._lock:
                 now = time.monotonic()
-                if now >= self._next_allowed:
-                    self._next_allowed = now + MIN_INTERVAL_SECONDS
+                nxt = self._next_allowed.get(key, 0.0)
+                if now >= nxt:
+                    self._next_allowed[key] = now + MIN_INTERVAL_SECONDS
                     return
-                wait = self._next_allowed - now
+                wait = nxt - now
             time.sleep(wait)
 
     def allowed_by_robots(self, url: str) -> bool:
@@ -100,7 +126,7 @@ class _FetchClient:
             return None
         last_error: Exception | None = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            self._wait_for_slot()
+            self._wait_for_slot(url)
             try:
                 response = httpx.get(
                     url, timeout=30, headers={"User-Agent": USER_AGENT},
@@ -108,6 +134,24 @@ class _FetchClient:
                 )
                 response.raise_for_status()
                 return response.content
+            except httpx.HTTPStatusError as exc:
+                # A 404 is an answer, not a failure to get one. Probe paths
+                # produce them by design -- four speculative URLs per campaign
+                # site -- and retrying each three times with backoff spent
+                # about half a minute per site learning what the first request
+                # already said. 5xx is the server struggling, so that retries.
+                if exc.response.status_code < 500:
+                    logger.debug("%s returned %d", url, exc.response.status_code)
+                    return None
+                last_error = exc
+                time.sleep(2.0 * attempt)
+            except (httpx.ConnectError, httpx.UnsupportedProtocol) as exc:
+                # A domain that does not resolve, or refuses the connection,
+                # will not start resolving two seconds later. Roughly a
+                # quarter of declared campaign addresses are dead registrations
+                # and each was costing three 30-second waits.
+                logger.debug("%s unreachable: %s", url, exc)
+                return None
             except httpx.HTTPError as exc:
                 last_error = exc
                 time.sleep(2.0 * attempt)

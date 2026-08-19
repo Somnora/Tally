@@ -6,6 +6,7 @@ from pipeline.webdocs import (
     discover_issue_links,
     discover_press_index,
     extract_text,
+    throttle_key,
 )
 
 HOMEPAGE = b"""
@@ -148,3 +149,23 @@ def test_press_release_slugs_stay_out_of_issue_discovery() -> None:
     '''
     links = discover_issue_links(html, "https://member.house.gov/")
     assert links == ["https://member.house.gov/issues"]
+
+
+# -- politeness ------------------------------------------------------------
+
+def test_official_site_subdomains_share_one_politeness_clock() -> None:
+    """Every member's site is a subdomain of house.gov but they share
+    servers. Spacing per subdomain would let 435 of them be hit at once."""
+    assert throttle_key("https://cammack.house.gov/issues") == "house.gov"
+    assert throttle_key("https://guest.house.gov/") == "house.gov"
+    assert throttle_key("https://www.collins.senate.gov/x") == "senate.gov"
+
+
+def test_unrelated_campaign_domains_get_their_own_clocks() -> None:
+    """The reason this is per host at all: 3,000 campaigns on 3,000 servers
+    were queued behind one global clock, which made a national pass take days
+    while no server saw traffic worth throttling."""
+    keys = {throttle_key(u) for u in (
+        "https://www.grahamforsenate.com/", "https://abdulforsenate.com/issues",
+        "https://alexbores.nyc")}
+    assert len(keys) == 3
