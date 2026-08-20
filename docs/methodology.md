@@ -102,6 +102,29 @@ report, and the remainder is mostly contributions filed since our last bulk
 load. Each candidate shows their own figure rather than this average, because
 the spread is wide.
 
+Two things that section gets right only because they were once wrong.
+
+The comparison covers one period. A campaign's official summary runs up to a
+filing date, and the itemized file we load runs to whenever we last
+downloaded it. Measuring everything we hold against a summary that stops in
+March told twenty candidates' readers that we held more of their money than
+the campaign had reported raising. We now count only contributions dated
+within the period the campaign has actually reported on.
+
+A candidate's own money is not a contribution to them. The FEC records money
+a candidate gives their own campaign under its own transaction type and
+reports it on its own line; we were adding it to individual contributions,
+which made a self-funded campaign look like a campaign with supporters. That
+was $27.5 million across 860 candidates in this cycle. It is now shown
+separately and labelled as what it is, because on a site about who is backing
+a candidate, the answer "they are" is a real answer and not a rounding
+detail.
+
+A small number of candidates still show slightly more held than reported,
+usually by a few percent. That is contributions filed after the campaign's
+last summary but dated inside it, and the card says so rather than rounding
+the number down and claiming to be complete.
+
 ### Bundling, and why we name it separately
 
 There are three ways money reaches a candidate, and a donor list shows only

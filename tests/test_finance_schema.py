@@ -136,3 +136,79 @@ def test_finance_views_roll_up_and_exclude_memo_ie_and_refunds(conn: db.Connecti
     assert len(top) == 1  # IE and memo rows never appear as "donors"
     assert top[0][0] == "Example PAC"
     assert int(top[0][1]) == 5000
+
+
+def test_a_candidates_own_money_is_not_counted_as_individual_support(
+    conn: db.Connection,
+) -> None:
+    """FEC type 15C is the candidate paying for their own campaign.
+
+    The FEC reports it on its own line, deliberately not under individual
+    contributions, and counting it as one makes a self-funded campaign look
+    like it has backers. On the whole 2026 file that was $27.5M across 860
+    candidates, which is the most misleading thing this column could say on a
+    site whose question is who is backing whom.
+    """
+    politician_id, source_id = _seed_candidate(conn)
+    db.upsert_donations_bulk(conn, [
+        _donation_row(politician_id, source_id, fec_sub_id="4090000000000000001",
+                      recipient_cmte_id="C00000001", contributor_cmte_id=None,
+                      contributor_name="SUPPORTER, REAL", transaction_tp="15",
+                      entity_tp="IND", amount=1_100),
+        _donation_row(politician_id, source_id, fec_sub_id="4090000000000000002",
+                      recipient_cmte_id="C00000001", contributor_cmte_id=None,
+                      contributor_name="DOE, JANE", transaction_tp="15C",
+                      entity_tp="IND", amount=9_600),
+    ])
+    db.refresh_finance_views(conn)
+    row = conn.execute(
+        "SELECT individual_itemized_loaded, candidate_self_funding "
+        "FROM mv_candidacy_finance WHERE politician_id = %s", (politician_id,)
+    ).fetchone()
+    assert row is not None
+    # Only the supporter's money counts as individual support.
+    assert row[0] == 1_100
+    # The candidate's own money is kept, and kept separate.
+    assert row[1] == 9_600
+
+
+def test_coverage_counts_only_money_from_the_period_the_campaign_reported(
+    conn: db.Connection,
+) -> None:
+    """The two sides of the coverage ratio describe the same window or it lies.
+
+    A campaign's official summary stops at a coverage date; the bulk file runs
+    to whenever we last downloaded it. Comparing everything we hold against a
+    four-month summary produced twenty candidates whose cards claimed we held
+    more of their money than they had reported raising.
+    """
+    politician_id, source_id = _seed_candidate(conn)
+    db.upsert_candidate_totals(conn, {
+        "fec_candidate_id": "S6ME00001", "cycle": 2026,
+        "politician_id": politician_id, "source_id": source_id,
+        "total_receipts": 10_000, "total_disbursements": 0, "cash_on_hand": 0,
+        "debts_owed": 0, "individual_itemized": 500,
+        "individual_unitemized": 0, "pac_contributions": 0,
+        "coverage_end": "2026-03-31",
+    })
+    db.upsert_donations_bulk(conn, [
+        _donation_row(politician_id, source_id, fec_sub_id="4090000000000000010",
+                      contributor_cmte_id=None, contributor_name="EARLY, ANN",
+                      transaction_tp="15", entity_tp="IND", amount=500,
+                      contributed_at="2026-03-01"),
+        # Filed in the same bulk file, but after the period the campaign has
+        # reported on. Counting it would claim coverage of money nobody has
+        # yet said they raised.
+        _donation_row(politician_id, source_id, fec_sub_id="4090000000000000011",
+                      contributor_cmte_id=None, contributor_name="LATE, BEN",
+                      transaction_tp="15", entity_tp="IND", amount=4_000,
+                      contributed_at="2026-07-15"),
+    ])
+    db.refresh_finance_views(conn)
+    row = conn.execute(
+        "SELECT individual_itemized_loaded, individual_itemized_official "
+        "FROM mv_candidacy_finance WHERE politician_id = %s", (politician_id,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 500
+    assert row[0] <= row[1]

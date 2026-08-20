@@ -127,7 +127,7 @@ function renderRace(){
       ).join('')}${bundled(c)}<p class="donor-note">A political action committee may give a
         candidate $5,000 per election, so $10,000 across a primary and a
         general. Party committees and a candidate&rsquo;s own affiliated
-        committees follow different rules and can appear here for more.</p>${coverage(f)}</div>`:''}
+        committees follow different rules and can appear here for more.</p>${coverage(f)}${selfFunding(f)}</div>`:''}
       ${votingRecord(c)}
       <div class="pcount">
         <h4>Promises on record</h4>
@@ -352,16 +352,44 @@ function coverage(f){
   const held = Number(f.individual_itemized_loaded||0);
   if(owed <= 0) return '';
   const pct = Math.min(100, Math.round(held/owed*100));
+  // Holding slightly more than the reported figure is a real outcome, not a
+  // rounding error: a campaign's summary covers up to a filing date, and
+  // contributions filed after it but dated inside it are already in our data.
+  // The bar has to stop at 100%, so the sentence has to say why, or a reader
+  // sees us claim 100% beside two numbers that plainly disagree.
+  const ahead = held > owed * 1.01;
+  const note = ahead
+    ? `Individual contributions: we hold itemized records for ${usd(held)},
+       slightly more than the ${usd(owed)} in this campaign's latest summary,
+       because contributions filed after that summary but dated within it are
+       already in our data.`
+    : `Individual contributions: we hold itemized records for ${usd(held)} of
+       the ${usd(owed)} this campaign reports (${pct}%). The remainder is
+       mostly contributions filed since our last bulk load.`;
   return `<div class="cover">
     <div class="cover-bar" role="img"
          aria-label="We hold ${pct} percent of itemized individual contributions">
       <span style="width:${pct}%"></span></div>
-    <p class="cover-note">Individual contributions: we hold itemized records for
-      ${usd(held)} of the ${usd(owed)} this campaign reports (${pct}%). The
-      remainder is mostly contributions filed since our last bulk load. Where
+    <p class="cover-note">${note} Where
       giving was bundled through a conduit we can see that it was, but cannot
       yet name the organisation that bundled it.
       <a href="methodology.html">How coverage is measured</a></p></div>`;
+}
+
+// Money the candidate gave their own campaign. Shown on its own because the
+// question this site answers is who is backing someone, and a campaign paid
+// for by its own candidate has a different answer to that than one funded by
+// other people. It used to be added to individual contributions, which said
+// the opposite.
+function selfFunding(f){
+  const own = Number(f.candidate_self_funding||0);
+  if(own <= 0) return '';
+  const raised = Number(f.total_receipts||0);
+  const share = raised > 0 ? Math.round(own/raised*100) : 0;
+  return `<p class="cover-note"><b>Self-funded:</b> this candidate has given
+    ${usd(own)} of their own money to the campaign${share > 0
+      ? `, ${share}% of everything it has raised` : ''}. That is not a
+    contribution from a supporter, and it is not counted as one above.</p>`;
 }
 
 

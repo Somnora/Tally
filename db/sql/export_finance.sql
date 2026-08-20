@@ -26,7 +26,12 @@ SELECT candidacy_id, politician_id, total_receipts, total_disbursements,
        cash_on_hand, individual_itemized_official, individual_unitemized,
        pac_contributions_official, ie_support, ie_oppose, coverage_end,
        GREATEST(COALESCE(individual_itemized_loaded, 0), 0)
-           AS individual_itemized_loaded
+           AS individual_itemized_loaded,
+       -- The candidate's own money (FEC type 15C), carried separately because
+       -- it answers the question this site is for. A campaign funded by its
+       -- own candidate is not a campaign with backers, and the two used to be
+       -- summed into one number that implied it was.
+       GREATEST(COALESCE(candidate_self_funding, 0), 0) AS candidate_self_funding
 FROM mv_candidacy_finance
 WHERE cycle = %(cycle)s
 ORDER BY candidacy_id
